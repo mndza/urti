@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "setuptools-git-versioning<2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "urti"
+dynamic = ["version"]
+authors = [
+    {name = "Great Scott Gadgets", email = "dev@greatscottgadgets.com"},
+]
+license = { text = "BSD" }
+description = "Python library for the Great Scott Gadgets URTI mainboard"
+urls = { Source = "https://greatscottgadgets.com/urti" }
+readme = "README.md"
+dependencies = [
+    "pyusb",
+    "future",
+    "pyfwup>=0.2",
+    "tqdm",
+    "tabulate",
+    "prompt_toolkit",
+]
+
+[project.optional-dependencies]
+gateware = [
+    "amaranth @ git+https://github.com/amaranth-lang/amaranth",
+    "luna @ git+https://github.com/greatscottgadgets/luna@main",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-dir]
+urti = "src"
+
+[tool.setuptools.package-data]
+"urti.shared" = ["*.toml"]

@@ -226,9 +226,9 @@ class URTIBasicTestGateware(Elaboratable):
 
         # Configure power supplies
         m.d.comb += [
-            platform.request("3v3a_en").o   .eq(1),
-            platform.request("3v3rx_en").o  .eq(1),
-            platform.request("3v3tx_en").o  .eq(0),
+            platform.request("pwr_3v3_a").o   .eq(1),
+            platform.request("pwr_3v3_rx").o  .eq(1),
+            platform.request("pwr_3v3_tx").o  .eq(0),
         ]
 
         # MAX5865 analog frontend ADC/DAC.

@@ -75,9 +75,9 @@ class URTIPlatformRev0D1(CynthionPlatform):
             attrs=Attrs(IO_TYPE="LVCMOS33", SLEWRATE="FAST")),
 
         # Control signals for the different power supplies (Analog, RX, TX).
-        Resource("3v3a_en",  0, Pins("E4", dir="o"),  Attrs(IO_TYPE="LVCMOS33")),
-        Resource("3v3rx_en", 0, Pins("A2", dir="o"),  Attrs(IO_TYPE="LVCMOS33")),
-        Resource("3v3tx_en", 0, Pins("J16", dir="o"), Attrs(IO_TYPE="LVCMOS33")),
+        Resource("pwr_3v3_a",  0, Pins("E4", dir="o"),  Attrs(IO_TYPE="LVCMOS33")),
+        Resource("pwr_3v3_rx", 0, Pins("A2", dir="o"),  Attrs(IO_TYPE="LVCMOS33")),
+        Resource("pwr_3v3_tx", 0, Pins("J16", dir="o"), Attrs(IO_TYPE="LVCMOS33")),
 
         # MAX5865 analog frontend (DAC/ADC).
         Resource("afe", 0,

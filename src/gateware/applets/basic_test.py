@@ -26,8 +26,9 @@ class URTITestRequestHandler(ControlRequestHandler):
     REQUEST_MAX5865_SET_OPMODE = 0
     REQUEST_MAX2120_READ_REG   = 1
     REQUEST_MAX2120_WRITE_REG  = 2
-    REQUEST_RFFC5072_READ_REG  = 3
-    REQUEST_RFFC5072_WRITE_REG = 4
+    REQUEST_MAX2120_SET_GAIN   = 3
+    REQUEST_RFFC5072_READ_REG  = 4
+    REQUEST_RFFC5072_WRITE_REG = 5
 
     def __init__(self):
         super().__init__()
@@ -37,6 +38,7 @@ class URTITestRequestHandler(ControlRequestHandler):
         self.max5865_set           = Signal()
 
         # Interface for MAX2120
+        self.max2120_gain          = Signal(6)
         self.max2120_busy          = Signal()
         self.max2120_address       = Signal(8)
         self.max2120_done          = Signal()
@@ -105,6 +107,12 @@ class URTITestRequestHandler(ControlRequestHandler):
                                     self.max2120_address        .eq(setup.index[:8]),
                                 ]
                                 m.next = "MAX2120_WRITE_REG"
+
+                            with m.Case(self.REQUEST_MAX2120_SET_GAIN):
+                                m.d.usb += [
+                                    self.max2120_gain           .eq(setup.value[:6]),
+                                ]
+                                m.next = "WRITE_REG_FINISH"
                                 
                             with m.Case(self.REQUEST_RFFC5072_READ_REG):
                                 m.d.usb += [
@@ -236,7 +244,8 @@ class URTIBasicTestGateware(Elaboratable):
         m.submodules.afe_data = afe_data = DomainRenamer("radio")(MAX5865DataInterface(pads=max5865_intf))
         m.submodules.afe_ctrl = afe_ctrl = DomainRenamer("usb")(MAX5865OpModeSetter(pads=max5865_intf, divisor=4))
         # MAX2120 Direct-Conversion Tuner.
-        m.submodules.max2120  = max2120  = DomainRenamer("usb")(MAX2120())
+        max2120_intf = platform.request("max2120")
+        m.submodules.max2120  = max2120  = DomainRenamer("usb")(MAX2120(pads=max2120_intf))
         # RFFC5072 3-wire serial interface and gain DAC.
         rffc5072_intf = platform.request("rx_mix_ctrl")
         m.submodules.rffc5072 = rffc5072 = DomainRenamer("usb")(RFFC5072RegisterInterface(pads=rffc5072_intf, divisor=256))
@@ -247,6 +256,7 @@ class URTIBasicTestGateware(Elaboratable):
             afe_ctrl.opmode                     .eq(req_handler.max5865_opmode),
             afe_ctrl.set                        .eq(req_handler.max5865_set),
             
+            max2120_intf.gain.o                 .eq(req_handler.max2120_gain),
             req_handler.max2120_busy            .eq(max2120.busy),
             max2120.address                     .eq(req_handler.max2120_address),
             req_handler.max2120_done            .eq(max2120.done),

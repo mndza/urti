@@ -4,6 +4,9 @@
 # Copyright (c) 2024 Great Scott Gadgets <info@greatscottgadgets.com>
 # SPDX-License-Identifier: BSD-3-Clause
 
+import usb
+import time
+
 from amaranth                                   import Elaboratable, Module, Signal, Cat, DomainRenamer
 from amaranth.lib.fifo                          import AsyncFIFO
 
@@ -298,5 +301,75 @@ class URTIBasicTestGateware(Elaboratable):
         return m
 
 
+
+class URTIBasicTestGatewareConnection:
+    """ Class representing a link to the URTI test gateware. """
+
+    USB_ID  = (0x16d0, 0xf3b)
+
+    def __init__(self):
+        """ Sets up a connection to the URTI device. """
+
+        # Try to create a connection.
+        device = usb.core.find(idVendor=self.USB_ID[0], idProduct=self.USB_ID[1])
+
+        # If we couldn't find a valid device, bail out.
+        if device is None:
+            raise IOError("Unable to find URTI device.")
+
+        self.device = device
+
+    def _print_methods(self):
+        import inspect
+
+        for name, member in inspect.getmembers(self):
+            if inspect.ismethod(member) and not name.startswith('_'):
+                func_args = list(inspect.signature(member).parameters.keys())
+                print(f"- {name}({', '.join(func_args)})")
+        
+    def _out_request(self, number, value=0, index=0, data=None, timeout=500):
+        """ Helper that issues an OUT control request to the debugger. """
+
+        request_type = usb.ENDPOINT_OUT | usb.RECIP_DEVICE | usb.TYPE_VENDOR
+        return self.device.ctrl_transfer(request_type, number, value, index, data, timeout=timeout)
+
+
+    def _in_request(self, number, value=0, index=0, length=0, timeout=500):
+        """ Helper that issues an IN control request to the debugger. """
+
+        request_type = usb.ENDPOINT_IN | usb.RECIP_DEVICE | usb.TYPE_VENDOR
+        result = self.device.ctrl_transfer(request_type, number, value, index, length, timeout=timeout)
+
+        return bytes(result)
+
+
+    def max5865_set_opmode(self, opmode):
+        self._out_request(URTITestRequestHandler.REQUEST_MAX5865_SET_OPMODE, value=opmode)
+
+    def max2120_set_gain(self, gain):
+        self._out_request(URTITestRequestHandler.REQUEST_MAX2120_SET_GAIN, value=gain)
+
+    def max2120_read(self, address):
+        return self._in_request(URTITestRequestHandler.REQUEST_MAX2120_READ_REG, index=address)
+
+    def max2120_write(self, address, value):
+        self._out_request(URTITestRequestHandler.REQUEST_MAX2120_WRITE_REG, value=value, index=address)
+
+    def rffc5072_read(self, address):
+        return self._in_request(URTITestRequestHandler.REQUEST_RFFC5072_READ_REG, index=address)
+
+    def rffc5072_write(self, address, value):
+        self._out_request(URTITestRequestHandler.REQUEST_RFFC5072_WRITE_REG, value=value, index=address)
+
+
 if __name__ == "__main__":
+    # Build and program the test gateware.
     top_level_cli(URTIBasicTestGateware)
+
+    # Wait for the USB device to be enumerated.
+    time.sleep(2)
+
+    # Create a connection to URTI and print a list of methods.
+    urti = URTIBasicTestGatewareConnection()
+    print("'urti' methods:")
+    urti._print_methods()

@@ -1,20 +1,23 @@
-from amaranth import Elaboratable, Module, Signal
+#
+# This file is part of URTI.
+#
+# Copyright (c) 2024 Great Scott Gadgets <info@greatscottgadgets.com>
+# SPDX-License-Identifier: BSD-3-Clause
+
+from amaranth                    import Module, Signal
+from amaranth.lib.wiring         import Component, In
+from amaranth_soc                import wishbone
+from amaranth_soc.memory         import MemoryMap
 
 from luna.gateware.interface.i2c import I2CRegisterInterface
 
-class MAX2120(Elaboratable):
+class MAX2120(Component):
     def __init__(self, *, pads):
-        self.pads          = pads
-
-        self.busy          = Signal()
-        self.address       = Signal(8)
-        self.done          = Signal()
-
-        self.read_request  = Signal()
-        self.read_data     = Signal(8)
-
-        self.write_request = Signal()
-        self.write_data    = Signal(8)
+        self.pads = pads
+        super().__init__({
+            "bus": In(wishbone.Signature(addr_width=4, data_width=8))
+        })
+        self.bus.memory_map = MemoryMap(addr_width=4, data_width=8, name="max2120")
 
     def elaborate(self, platform):
         m = Module()
@@ -23,17 +26,25 @@ class MAX2120(Elaboratable):
         # Max I2C clock frequency is 400 kHz
         m.submodules.i2c_regs = i2c_regs = I2CRegisterInterface(self.pads, period_cyc=100, address=0b1100001)
 
+        start = Signal()
         m.d.comb += [
-            self.busy               .eq(i2c_regs.busy),
-            i2c_regs.address        .eq(self.address),
-            self.done               .eq(i2c_regs.done),
+            i2c_regs.address        .eq(self.bus.adr),
 
-            i2c_regs.read_request   .eq(self.read_request),
-            self.read_data          .eq(i2c_regs.read_data),
+            i2c_regs.write_data     .eq(self.bus.dat_w),
+            self.bus.dat_r          .eq(i2c_regs.read_data),
 
-            i2c_regs.write_request  .eq(self.write_request),
-            i2c_regs.write_data     .eq(self.write_data),
+            start                   .eq(
+                self.bus.cyc    &    # Transaction is active.
+                self.bus.stb    &    # Valid data is being provided.
+                self.bus.we     &    # This is a write.
+                self.bus.sel[0] &    # The relevant data lane is being targeted.
+                ~i2c_regs.busy       # The I2C register interface is idle.
+            ),
+
+            i2c_regs.read_request   .eq(start & ~self.bus.we),
+            i2c_regs.write_request  .eq(start &  self.bus.we),
+
+            self.bus.ack            .eq(i2c_regs.done),
         ]
 
         return m
-

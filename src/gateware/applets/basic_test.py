@@ -9,6 +9,8 @@ import time
 
 from amaranth                                   import Elaboratable, Module, Signal, Cat, DomainRenamer
 from amaranth.lib.fifo                          import AsyncFIFO
+from amaranth.lib.wiring                        import Out, Signature, connect
+from amaranth_soc                               import wishbone
 
 from usb_protocol.emitters                      import DeviceDescriptorCollection
 from usb_protocol.types                         import USBRequestType
@@ -20,60 +22,34 @@ from luna.gateware.usb.usb2.transfer            import USBInStreamInterface
 from luna.gateware.stream.generator             import StreamSerializer
 
 from urti.gateware.architecture.car             import URTIDomainGenerator
-from urti.gateware.interface.max5865            import MAX5865DataInterface, MAX5865OpMode, MAX5865OpModeSetter
+from urti.gateware.interface.max5865            import MAX5865DataInterface, MAX5865OpModeSetter
 from urti.gateware.interface.max2120            import MAX2120
 from urti.gateware.interface.rffc5072           import RFFC5072RegisterInterface
 
 
 class URTITestRequestHandler(ControlRequestHandler):
-    REQUEST_MAX5865_SET_OPMODE = 0
-    REQUEST_MAX2120_READ_REG   = 1
-    REQUEST_MAX2120_WRITE_REG  = 2
-    REQUEST_MAX2120_SET_GAIN   = 3
-    REQUEST_RFFC5072_READ_REG  = 4
-    REQUEST_RFFC5072_WRITE_REG = 5
+    REQUEST_READ_REG           = 0
+    REQUEST_WRITE_REG          = 1
+    REQUEST_MAX2120_SET_GAIN   = 2
 
     def __init__(self):
         super().__init__()
-        
-        # Interface for setting MAX5865 opmode
-        self.max5865_opmode        = Signal(MAX5865OpMode)
-        self.max5865_set           = Signal()
-
-        # Interface for MAX2120
-        self.max2120_gain          = Signal(6)
-        self.max2120_busy          = Signal()
-        self.max2120_address       = Signal(8)
-        self.max2120_done          = Signal()
-        self.max2120_read_request  = Signal()
-        self.max2120_read_data     = Signal(8)
-        self.max2120_write_request = Signal()
-        self.max2120_write_data    = Signal(8)
-
-        # Interface for RFFC5072
-        self.rffc5072_start        = Signal()
-        self.rffc5072_busy         = Signal()
-        self.rffc5072_address      = Signal(7)
-        self.rffc5072_is_write     = Signal()
-        self.rffc5072_data_in      = Signal(16)
-        self.rffc5072_data_out     = Signal(16)
+        self.signature = Signature({
+            "bus": Out(wishbone.Signature(addr_width=8, data_width=16))
+        }).create()
+        self.bus          = self.signature.bus
+        self.max2120_gain = Signal(6)
 
     def elaborate(self, platform):
         m = Module()
 
-        interface         = self.interface
-        setup             = self.interface.setup
+        interface = self.interface
+        setup     = self.interface.setup
+        read_data = Signal.like(self.bus.dat_r)
 
         # Handler for read register requests.
         m.submodules.transmitter = transmitter = \
             StreamSerializer(data_length=2, domain="usb", stream_type=USBInStreamInterface, max_length_width=2)
-
-        m.d.usb += [
-            self.max5865_set            .eq(0),
-            self.rffc5072_start         .eq(0),
-            self.max2120_read_request   .eq(0),
-            self.max2120_write_request  .eq(0),
-        ]
 
         with m.If(setup.type == USBRequestType.VENDOR):
             
@@ -88,28 +64,26 @@ class URTITestRequestHandler(ControlRequestHandler):
 
                         with m.Switch(setup.request):
 
-                            with m.Case(self.REQUEST_MAX5865_SET_OPMODE):
+                            with m.Case(self.REQUEST_READ_REG):
                                 m.d.usb += [
-                                    self.max5865_opmode .eq(setup.value[:3]),
-                                    self.max5865_set    .eq(1),
+                                    self.bus.cyc                .eq(1),
+                                    self.bus.stb                .eq(1),
+                                    self.bus.we                 .eq(0),
+                                    self.bus.sel                .eq(1),
+                                    self.bus.adr                .eq(setup.index),
                                 ]
-                                # TODO: wait for the module to finish before ACK
-                                m.next = "WRITE_REG_FINISH"
+                                m.next = "READ_WAIT_FOR_ACK"
 
-                            with m.Case(self.REQUEST_MAX2120_READ_REG):
+                            with m.Case(self.REQUEST_WRITE_REG):
                                 m.d.usb += [
-                                    self.max2120_read_request   .eq(1),
-                                    self.max2120_address        .eq(setup.index[:8]),
+                                    self.bus.cyc                .eq(1),
+                                    self.bus.stb                .eq(1),
+                                    self.bus.we                 .eq(1),
+                                    self.bus.sel                .eq(1),
+                                    self.bus.adr                .eq(setup.index),
+                                    self.bus.dat_w              .eq(setup.value),
                                 ]
-                                m.next = "MAX2120_READ_REG"
-
-                            with m.Case(self.REQUEST_MAX2120_WRITE_REG):
-                                m.d.usb += [
-                                    self.max2120_write_request  .eq(1),
-                                    self.max2120_write_data     .eq(setup.value[:8]),
-                                    self.max2120_address        .eq(setup.index[:8]),
-                                ]
-                                m.next = "MAX2120_WRITE_REG"
+                                m.next = "WRITE_WAIT_FOR_ACK"
 
                             with m.Case(self.REQUEST_MAX2120_SET_GAIN):
                                 m.d.usb += [
@@ -117,47 +91,28 @@ class URTITestRequestHandler(ControlRequestHandler):
                                 ]
                                 m.next = "WRITE_REG_FINISH"
                                 
-                            with m.Case(self.REQUEST_RFFC5072_READ_REG):
-                                m.d.usb += [
-                                    self.rffc5072_start         .eq(1),
-                                    self.rffc5072_is_write      .eq(0),
-                                    self.rffc5072_address       .eq(setup.index[:7]),
-                                ]
-                                m.next = "RFFC5072_READ_REG"
-
-                            with m.Case(self.REQUEST_RFFC5072_WRITE_REG):
-                                m.d.usb += [
-                                    self.rffc5072_start         .eq(1),
-                                    self.rffc5072_is_write      .eq(1),
-                                    self.rffc5072_data_in       .eq(setup.value[:16]),
-                                    self.rffc5072_address       .eq(setup.index[:7]),
-                                ]
-                                m.next = "RFFC5072_WRITE_REG"
-
                             with m.Default():
                                 m.next = "UNHANDLED"
 
-                with m.State("MAX2120_READ_REG"):
-                    with m.If(self.max2120_done):
-                        m.next = "MAX2120_READ_REG_FINISH"
-
-                with m.State("MAX2120_READ_REG_FINISH"):
-                    self.handle_simple_data_request(m, transmitter, self.max2120_read_data, length=1)
-
-                with m.State("RFFC5072_READ_REG"):
-                    with m.If(~self.rffc5072_busy):
-                        m.next = "RFFC5072_READ_REG_FINISH"
-
-                with m.State("RFFC5072_READ_REG_FINISH"):
-                    self.handle_simple_data_request(m, transmitter, self.rffc5072_data_out, length=2)
-
-                with m.State("MAX2120_WRITE_REG"):
-                    with m.If(self.max2120_done):
+                with m.State("READ_WAIT_FOR_ACK"):
+                    with m.If(self.bus.ack):
+                        m.d.usb += [
+                            self.bus.cyc    .eq(0),
+                            self.bus.stb    .eq(0),
+                            read_data       .eq(self.bus.dat_r),
+                        ]
+                        m.next = "READ_REG_FINISH"
+                
+                with m.State("WRITE_WAIT_FOR_ACK"):
+                    with m.If(self.bus.ack):
+                        m.d.usb += [
+                            self.bus.cyc    .eq(0),
+                            self.bus.stb    .eq(0),
+                        ]
                         m.next = "WRITE_REG_FINISH"
 
-                with m.State("RFFC5072_WRITE_REG"):
-                    with m.If(~self.rffc5072_busy):
-                        m.next = "WRITE_REG_FINISH"
+                with m.State("READ_REG_FINISH"):
+                    self.handle_simple_data_request(m, transmitter, read_data, length=len(read_data)//8)
 
                 with m.State("WRITE_REG_FINISH"):
                     # Provide an response to the STATUS stage.
@@ -253,29 +208,15 @@ class URTIBasicTestGateware(Elaboratable):
         rffc5072_intf = platform.request("rx_mix_ctrl")
         m.submodules.rffc5072 = rffc5072 = DomainRenamer("usb")(RFFC5072RegisterInterface(pads=rffc5072_intf, divisor=256))
         
-        # Connect interface lines to request handler.
-        # TODO: Use amaranth.lib.wiring to greatly simplify these connections.
-        m.d.comb += [
-            afe_ctrl.opmode                     .eq(req_handler.max5865_opmode),
-            afe_ctrl.set                        .eq(req_handler.max5865_set),
-            
-            max2120_intf.gain.o                 .eq(req_handler.max2120_gain),
-            req_handler.max2120_busy            .eq(max2120.busy),
-            max2120.address                     .eq(req_handler.max2120_address),
-            req_handler.max2120_done            .eq(max2120.done),
-            max2120.read_request                .eq(req_handler.max2120_read_request),
-            req_handler.max2120_read_data       .eq(max2120.read_data),
-            max2120.write_request               .eq(req_handler.max2120_write_request),
-            max2120.write_data                  .eq(req_handler.max2120_write_data),
+        # Create a Wishbone decoder that routes requests to the different targets.
+        # TODO: generate memory map automatically
+        m.submodules.decoder = decoder = wishbone.Decoder(addr_width=8, data_width=16)
+        decoder.add(max2120.bus,  addr=0x00, sparse=True)
+        decoder.add(rffc5072.bus, addr=0x20, sparse=True)
+        decoder.add(afe_ctrl.bus, addr=0x40, sparse=True)
 
-            rffc5072.start                      .eq(req_handler.rffc5072_start),
-            req_handler.rffc5072_busy           .eq(rffc5072.busy),
-            rffc5072.address                    .eq(req_handler.rffc5072_address),
-            rffc5072.is_write                   .eq(req_handler.rffc5072_is_write),
-            rffc5072.data_in                    .eq(req_handler.rffc5072_data_in),
-            req_handler.rffc5072_data_out       .eq(rffc5072.data_out),
-        ]
-
+        # Connect our request handler to the Wshbone decoder.
+        connect(m, req_handler.bus, decoder.bus)
 
         # Add a stream endpoint to our device with samples truncated to 4 bits.
         stream_ep = USBStreamInEndpoint(
@@ -307,6 +248,10 @@ class URTIBasicTestGatewareConnection:
 
     USB_ID  = (0x16d0, 0xf3b)
 
+    MAX2120_BASE_ADDR     = 0x00
+    RFFC5072_RX_BASE_ADDR = 0x20
+    MAX5865_BASE_ADDR     = 0x40
+
     def __init__(self):
         """ Sets up a connection to the URTI device. """
 
@@ -327,14 +272,13 @@ class URTIBasicTestGatewareConnection:
                 func_args = list(inspect.signature(member).parameters.keys())
                 print(f"- {name}({', '.join(func_args)})")
         
-    def _out_request(self, number, value=0, index=0, data=None, timeout=500):
+    def _out_request(self, number, value=0, index=0, data=None, timeout=1000):
         """ Helper that issues an OUT control request to the debugger. """
 
         request_type = usb.ENDPOINT_OUT | usb.RECIP_DEVICE | usb.TYPE_VENDOR
         return self.device.ctrl_transfer(request_type, number, value, index, data, timeout=timeout)
 
-
-    def _in_request(self, number, value=0, index=0, length=0, timeout=500):
+    def _in_request(self, number, value=0, index=0, length=0, timeout=1000):
         """ Helper that issues an IN control request to the debugger. """
 
         request_type = usb.ENDPOINT_IN | usb.RECIP_DEVICE | usb.TYPE_VENDOR
@@ -342,24 +286,23 @@ class URTIBasicTestGatewareConnection:
 
         return bytes(result)
 
-
     def max5865_set_opmode(self, opmode):
-        self._out_request(URTITestRequestHandler.REQUEST_MAX5865_SET_OPMODE, value=opmode)
+        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=opmode, index=self.MAX5865_BASE_ADDR)
 
     def max2120_set_gain(self, gain):
         self._out_request(URTITestRequestHandler.REQUEST_MAX2120_SET_GAIN, value=gain)
 
     def max2120_read(self, address):
-        return self._in_request(URTITestRequestHandler.REQUEST_MAX2120_READ_REG, index=address)
+        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.MAX2120_BASE_ADDR | address)
 
     def max2120_write(self, address, value):
-        self._out_request(URTITestRequestHandler.REQUEST_MAX2120_WRITE_REG, value=value, index=address)
+        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.MAX2120_BASE_ADDR | address)
 
     def rffc5072_read(self, address):
-        return self._in_request(URTITestRequestHandler.REQUEST_RFFC5072_READ_REG, index=address)
+        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.RFFC5072_RX_BASE_ADDR | address)
 
     def rffc5072_write(self, address, value):
-        self._out_request(URTITestRequestHandler.REQUEST_RFFC5072_WRITE_REG, value=value, index=address)
+        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.RFFC5072_RX_BASE_ADDR | address)
 
 
 if __name__ == "__main__":

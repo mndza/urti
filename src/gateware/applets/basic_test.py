@@ -11,6 +11,8 @@ from amaranth                                   import Elaboratable, Module, Sig
 from amaranth.lib.fifo                          import AsyncFIFO
 from amaranth.lib.wiring                        import Out, Signature, connect
 from amaranth_soc                               import wishbone
+from amaranth_soc                               import csr
+from amaranth_soc.csr.wishbone                  import WishboneCSRBridge
 
 from usb_protocol.emitters                      import DeviceDescriptorCollection
 from usb_protocol.types                         import USBRequestType
@@ -28,17 +30,15 @@ from urti.gateware.interface.rffc5072           import RFFC5072RegisterInterface
 
 
 class URTITestRequestHandler(ControlRequestHandler):
-    REQUEST_READ_REG           = 0
-    REQUEST_WRITE_REG          = 1
-    REQUEST_MAX2120_SET_GAIN   = 2
+    REQUEST_READ_REG   = 0
+    REQUEST_WRITE_REG  = 1
 
     def __init__(self):
         super().__init__()
         self.signature = Signature({
             "bus": Out(wishbone.Signature(addr_width=8, data_width=16))
         }).create()
-        self.bus          = self.signature.bus
-        self.max2120_gain = Signal(6)
+        self.bus = self.signature.bus
 
     def elaborate(self, platform):
         m = Module()
@@ -85,12 +85,6 @@ class URTITestRequestHandler(ControlRequestHandler):
                                 ]
                                 m.next = "WRITE_WAIT_FOR_ACK"
 
-                            with m.Case(self.REQUEST_MAX2120_SET_GAIN):
-                                m.d.usb += [
-                                    self.max2120_gain           .eq(setup.value[:6]),
-                                ]
-                                m.next = "WRITE_REG_FINISH"
-                                
                             with m.Default():
                                 m.next = "UNHANDLED"
 
@@ -208,12 +202,28 @@ class URTIBasicTestGateware(Elaboratable):
         rffc5072_intf = platform.request("rx_mix_ctrl")
         m.submodules.rffc5072 = rffc5072 = DomainRenamer("usb")(RFFC5072RegisterInterface(pads=rffc5072_intf, divisor=256))
         
+
         # Create a Wishbone decoder that routes requests to the different targets.
         # TODO: generate memory map automatically
         m.submodules.decoder = decoder = wishbone.Decoder(addr_width=8, data_width=16)
         decoder.add(max2120.bus,  addr=0x00, sparse=True)
         decoder.add(rffc5072.bus, addr=0x20, sparse=True)
         decoder.add(afe_ctrl.bus, addr=0x40, sparse=True)
+
+        # Define set of CSR registers.abs
+        # TODO: move this inside MAX2120?
+        max2120_gain = csr.Element(width=len(max2120_intf.gain.o), access="rw")
+        m.d.comb += max2120_gain.r_data.eq(max2120_intf.gain.o)
+        with m.If(max2120_gain.w_stb):
+            m.d.sync += max2120_intf.gain.o.eq(max2120_gain.w_data)
+
+        # Add the CSR registers to the decoder using a multiplexer and a Wishbone-CSR bridge.
+        csr_mux = csr.Multiplexer(addr_width=4, data_width=8)
+        csr_mux.add(max2120_gain, name="max2120_gain")
+        csr_bridge = WishboneCSRBridge(csr_mux.bus)
+        decoder.add(csr_bridge.wb_bus, addr=0x50, sparse=True)
+        m.submodules += [csr_mux, csr_bridge]
+
 
         # Connect our request handler to the Wshbone decoder.
         connect(m, req_handler.bus, decoder.bus)
@@ -251,6 +261,7 @@ class URTIBasicTestGatewareConnection:
     MAX2120_BASE_ADDR     = 0x00
     RFFC5072_RX_BASE_ADDR = 0x20
     MAX5865_BASE_ADDR     = 0x40
+    MAX2120_GAIN_ADDR     = 0x50
 
     def __init__(self):
         """ Sets up a connection to the URTI device. """
@@ -290,7 +301,7 @@ class URTIBasicTestGatewareConnection:
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=opmode, index=self.MAX5865_BASE_ADDR)
 
     def max2120_set_gain(self, gain):
-        self._out_request(URTITestRequestHandler.REQUEST_MAX2120_SET_GAIN, value=gain)
+        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=gain, index=self.MAX2120_GAIN_ADDR)
 
     def max2120_read(self, address):
         return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.MAX2120_BASE_ADDR | address)

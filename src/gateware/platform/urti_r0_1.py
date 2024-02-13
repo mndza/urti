@@ -149,9 +149,9 @@ class URTIPlatformRev0D1(URTIPlatform):
             Subsignal("ld",     Pins("F14", dir="i")),
             # RSSI ?
             # 3-wire serial interface
-            Subsignal("din",    Pins("G13", dir="i")),
-            Subsignal("sclk",   Pins("G15", dir="i")),
-            Subsignal("cs",     PinsN("H12", dir="i")),
+            Subsignal("din",    Pins("G13", dir="o")),
+            Subsignal("sclk",   Pins("E16", dir="o")),
+            Subsignal("cs",     PinsN("H12", dir="o")),
             Attrs(IO_TYPE="LVCMOS33")
         ),
 

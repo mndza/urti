@@ -9,12 +9,11 @@ import os
 from amaranth.build import *
 from amaranth_boards.resources import *
 
-# TODO: get rid of CynthionPlatform
-from cynthion.gateware.platform.core import CynthionPlatform
+from .core import URTIPlatform
 
 __all__ = ["URTIPlatformRev0D1"]
 
-class URTIPlatformRev0D1(CynthionPlatform):
+class URTIPlatformRev0D1(URTIPlatform):
     """ Board description for URTI r0.1 """
 
     name        = "URTI r0.1"

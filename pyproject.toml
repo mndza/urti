@@ -13,18 +13,15 @@ description = "Python library for the Great Scott Gadgets URTI mainboard"
 urls = { Source = "https://greatscottgadgets.com/urti" }
 readme = "README.md"
 dependencies = [
+    "amaranth @ git+https://github.com/amaranth-lang/amaranth",
+    "amaranth-soc @ git+https://github.com/amaranth-lang/amaranth-soc",
+    "luna @ git+https://github.com/mndza/luna.git@remove-deprecated-helpers",
     "pyusb",
     "future",
     "pyfwup>=0.2",
     "tqdm",
     "tabulate",
     "prompt_toolkit",
-]
-
-[project.optional-dependencies]
-gateware = [
-    "amaranth @ git+https://github.com/amaranth-lang/amaranth",
-    "luna @ git+https://github.com/greatscottgadgets/luna@main",
 ]
 
 [tool.setuptools]

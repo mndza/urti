@@ -46,7 +46,7 @@ class RFFC5072RegisterInterface(Component):
     """
     Simple register interface for RFFC5072 three-wire bus.
     """
-    def __init__(self, *, pads, divisor):
+    def __init__(self, *, pads, divisor, name=None):
         """
         Parameters:
             pads         -- contains the three-wire bus signals
@@ -59,7 +59,7 @@ class RFFC5072RegisterInterface(Component):
         super().__init__({
             "bus": In(wishbone.Signature(addr_width=5, data_width=16))  # address is actually 7 bits
         })
-        self.bus.memory_map = MemoryMap(addr_width=5, data_width=16, name="rffc5072")
+        self.bus.memory_map = MemoryMap(addr_width=5, data_width=16, name=name or "rffc5072")
 
 
     def elaborate(self, platform):

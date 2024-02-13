@@ -26,6 +26,7 @@ from luna.gateware.stream.generator             import StreamSerializer
 from urti.gateware.architecture.car             import URTIDomainGenerator
 from urti.gateware.interface.max5865            import MAX5865DataInterface, MAX5865OpModeSetter
 from urti.gateware.interface.max2120            import MAX2120
+from urti.gateware.interface.max2831            import MAX2831
 from urti.gateware.interface.rffc5072           import RFFC5072RegisterInterface
 
 
@@ -188,7 +189,7 @@ class URTIBasicTestGateware(Elaboratable):
         m.d.comb += [
             platform.request("pwr_3v3_a").o   .eq(1),
             platform.request("pwr_3v3_rx").o  .eq(1),
-            platform.request("pwr_3v3_tx").o  .eq(0),
+            platform.request("pwr_3v3_tx").o  .eq(1),
         ]
 
         # MAX5865 analog frontend ADC/DAC.
@@ -198,33 +199,54 @@ class URTIBasicTestGateware(Elaboratable):
         # MAX2120 Direct-Conversion Tuner.
         max2120_intf = platform.request("max2120")
         m.submodules.max2120  = max2120  = DomainRenamer("usb")(MAX2120(pads=max2120_intf))
-        # RFFC5072 3-wire serial interface and gain DAC.
-        rffc5072_intf = platform.request("rx_mix_ctrl")
-        m.submodules.rffc5072 = rffc5072 = DomainRenamer("usb")(RFFC5072RegisterInterface(pads=rffc5072_intf, divisor=256))
-        
+        # RFFC5072 wideband synthesizer / VCO with integrated mixer (RX and TX).
+        rffc5072_rx_intf = platform.request("rx_mix_ctrl")
+        m.submodules.rffc5072_rx = rffc5072_rx = DomainRenamer("usb")(
+            RFFC5072RegisterInterface(pads=rffc5072_rx_intf, divisor=256, name="rffc5072_rx"))
+        rffc5072_tx_intf = platform.request("tx_mix_ctrl")
+        m.submodules.rffc5072_tx = rffc5072_tx = DomainRenamer("usb")(
+            RFFC5072RegisterInterface(pads=rffc5072_tx_intf, divisor=256, name="rffc5072_tx"))
+        # MAX2831 RF transceiver (used for TX only).
+        max2831_intf = platform.request("max2831")
+        m.submodules.max2831 = max2831 = DomainRenamer("usb")(MAX2831(pads=max2831_intf, divisor=4))
+
 
         # Create a Wishbone decoder that routes requests to the different targets.
         # TODO: generate memory map automatically
         m.submodules.decoder = decoder = wishbone.Decoder(addr_width=8, data_width=16)
-        decoder.add(max2120.bus,  addr=0x00, sparse=True)
-        decoder.add(rffc5072.bus, addr=0x20, sparse=True)
-        decoder.add(afe_ctrl.bus, addr=0x40, sparse=True)
+        decoder.add(max2120.bus,     addr=0x00, sparse=True)
+        decoder.add(rffc5072_rx.bus, addr=0x20, sparse=True)
+        decoder.add(afe_ctrl.bus,    addr=0x40, sparse=True)
+        decoder.add(max2831.bus,     addr=0x50, sparse=True)
+        decoder.add(rffc5072_tx.bus, addr=0x60, sparse=True)
 
+        #
         # Define set of CSR registers.
+        #
+
         # TODO: move this inside MAX2120?
         max2120_gain_reg = csr.reg.Register({
             "gain": csr.Field(csr.action.RW, len(max2120_intf.gain.o))
         }, access="rw")
         m.d.comb += max2120_intf.gain.o.eq(max2120_gain_reg.f.gain.data)
 
+        # LEDs
+        leds = Cat([platform.request("led", i, dir="o").o for i in range(3)])
+        leds_reg = csr.reg.Register({
+            "led": csr.Field(csr.action.RW, len(leds))
+        }, access="rw")
+        m.d.comb += leds.eq(leds_reg.f.led.data)
+
+        # Gather all CSR definitions.
         regs = csr.Builder(addr_width=4, data_width=8)
         regs.add("max2120_gain", max2120_gain_reg)
+        regs.add("leds", leds_reg)
         
         # Add the CSR registers to the Wishbone decoder.
         csr_bridge = csr.Bridge(regs.as_memory_map())
         wb_bridge = WishboneCSRBridge(csr_bridge.bus)
         m.submodules += [csr_bridge, wb_bridge]
-        decoder.add(wb_bridge.wb_bus, addr=0x50, sparse=True)
+        decoder.add(wb_bridge.wb_bus, addr=0x80, sparse=True)
 
         # Connect our request handler to the Wshbone decoder.
         connect(m, req_handler.bus, decoder.bus)
@@ -262,7 +284,13 @@ class URTIBasicTestGatewareConnection:
     MAX2120_BASE_ADDR     = 0x00
     RFFC5072_RX_BASE_ADDR = 0x20
     MAX5865_BASE_ADDR     = 0x40
-    MAX2120_GAIN_ADDR     = 0x50
+    MAX2831_BASE_ADDR     = 0x50
+    RFFC5072_TX_BASE_ADDR = 0x60
+    CSR_BASE_ADDR         = 0x80
+
+    CSR_MAX2120_GAIN_ADDR = 0x00
+    CSR_LEDS_ADDR         = 0x01
+
 
     def __init__(self):
         """ Sets up a connection to the URTI device. """
@@ -302,7 +330,7 @@ class URTIBasicTestGatewareConnection:
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=opmode, index=self.MAX5865_BASE_ADDR)
 
     def max2120_set_gain(self, gain):
-        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=gain, index=self.MAX2120_GAIN_ADDR)
+        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=gain, index=self.CSR_BASE_ADDR | self.CSR_MAX2120_GAIN_ADDR)
 
     def max2120_read(self, address):
         return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.MAX2120_BASE_ADDR | address)
@@ -310,11 +338,23 @@ class URTIBasicTestGatewareConnection:
     def max2120_write(self, address, value):
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.MAX2120_BASE_ADDR | address)
 
-    def rffc5072_read(self, address):
+    def rffc5072_rx_read(self, address):
         return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.RFFC5072_RX_BASE_ADDR | address)
 
-    def rffc5072_write(self, address, value):
+    def rffc5072_rx_write(self, address, value):
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.RFFC5072_RX_BASE_ADDR | address)
+
+    def rffc5072_tx_read(self, address):
+        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.RFFC5072_TX_BASE_ADDR | address)
+
+    def rffc5072_tx_write(self, address, value):
+        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.RFFC5072_TX_BASE_ADDR | address)
+
+    def max2831_write(self, address, value):
+        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.MAX2831_BASE_ADDR | address)
+
+    def set_led_pattern(self, pattern):
+        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=pattern, index=self.CSR_BASE_ADDR | self.CSR_LEDS_ADDR)
 
 
 if __name__ == "__main__":

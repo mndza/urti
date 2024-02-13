@@ -210,20 +210,21 @@ class URTIBasicTestGateware(Elaboratable):
         decoder.add(rffc5072.bus, addr=0x20, sparse=True)
         decoder.add(afe_ctrl.bus, addr=0x40, sparse=True)
 
-        # Define set of CSR registers.abs
+        # Define set of CSR registers.
         # TODO: move this inside MAX2120?
-        max2120_gain = csr.Element(width=len(max2120_intf.gain.o), access="rw")
-        m.d.comb += max2120_gain.r_data.eq(max2120_intf.gain.o)
-        with m.If(max2120_gain.w_stb):
-            m.d.sync += max2120_intf.gain.o.eq(max2120_gain.w_data)
+        max2120_gain_reg = csr.reg.Register({
+            "gain": csr.Field(csr.action.RW, len(max2120_intf.gain.o))
+        }, access="rw")
+        m.d.comb += max2120_intf.gain.o.eq(max2120_gain_reg.f.gain.data)
 
-        # Add the CSR registers to the decoder using a multiplexer and a Wishbone-CSR bridge.
-        csr_mux = csr.Multiplexer(addr_width=4, data_width=8)
-        csr_mux.add(max2120_gain, name="max2120_gain")
-        csr_bridge = WishboneCSRBridge(csr_mux.bus)
-        decoder.add(csr_bridge.wb_bus, addr=0x50, sparse=True)
-        m.submodules += [csr_mux, csr_bridge]
-
+        regs = csr.Builder(addr_width=4, data_width=8)
+        regs.add("max2120_gain", max2120_gain_reg)
+        
+        # Add the CSR registers to the Wishbone decoder.
+        csr_bridge = csr.Bridge(regs.as_memory_map())
+        wb_bridge = WishboneCSRBridge(csr_bridge.bus)
+        m.submodules += [csr_bridge, wb_bridge]
+        decoder.add(wb_bridge.wb_bus, addr=0x50, sparse=True)
 
         # Connect our request handler to the Wshbone decoder.
         connect(m, req_handler.bus, decoder.bus)

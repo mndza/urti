@@ -6,22 +6,36 @@
 
 """ Clock and reset (CAR) controllers for URTI. """
 
-from amaranth import Signal, Module, ClockDomain, ClockSignal, Elaboratable, Instance, ResetSignal
+from amaranth import Signal, ClockDomain, ClockSignal, Instance, ResetSignal
 
-class URTIDomainGenerator(Elaboratable):
+from luna.gateware.architecture.car import LunaDomainGenerator
+
+class URTIDomainGenerator(LunaDomainGenerator):
     """ """
 
-    def elaborate(self, platform):
-        m = Module()
+    def __init__(self):
+        super().__init__(clock_signal_frequency=40e6)
+
+    def create_submodules(self, m, platform):
 
         # Grab our default input clock.
         input_clock = platform.request(platform.default_clk, dir="i").i
 
-        # Create our domains; but don't do anything else for them, for now.
+        # Internal signals for each of our clocks.
+        self._clk_240MHz = Signal()
+        self._clk_120MHz = Signal()
+        self._clk_60MHz  = Signal()
+        self._clk_40MHz  = Signal()
+        self._clock_options = {
+            40:  self._clk_40MHz,
+            60:  self._clk_60MHz,
+            120: self._clk_120MHz,
+            240: self._clk_240MHz
+        }
+
+        # Create the radio clock domain. Others are created in the parent class.
         m.domains.radio  = ClockDomain()
-        m.domains.sync   = ClockDomain()
-        m.domains.usb    = ClockDomain()
-        m.domains.fast   = ClockDomain()
+        m.d.comb += ClockSignal(domain="radio").eq(self._clk_40MHz)
 
         locked   = Signal()
 
@@ -33,10 +47,10 @@ class URTIDomainGenerator(Elaboratable):
             i_CLKI=input_clock,
 
             # Generated clock outputs.
-            o_CLKOP=ClockSignal("fast"),
-            o_CLKOS=ClockSignal("sync"),
-            o_CLKOS2=ClockSignal("usb"),
-            o_CLKOS3=ClockSignal("radio"),
+            o_CLKOP=self._clk_240MHz,
+            o_CLKOS=self._clk_120MHz,
+            o_CLKOS2=self._clk_60MHz,
+            o_CLKOS3=self._clk_40MHz,
 
             # Status.
             o_LOCK=locked,
@@ -115,4 +129,11 @@ class URTIDomainGenerator(Elaboratable):
             ResetSignal("usb")     .eq(~locked),
         ]
 
-        return m
+    def generate_usb_clock(self, m, platform):
+        return self._clock_options[60]
+
+    def generate_sync_clock(self, m, platform):
+        return self._clock_options[120]
+
+    def generate_fast_clock(self, m, platform):
+        return self._clock_options[240]

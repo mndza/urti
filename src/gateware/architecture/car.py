@@ -126,7 +126,6 @@ class URTIDomainGenerator(LunaDomainGenerator):
             ResetSignal("radio")   .eq(~locked),
             ResetSignal("sync")    .eq(~locked),
             ResetSignal("fast")    .eq(~locked),
-            ResetSignal("usb")     .eq(~locked),
         ]
 
     def generate_usb_clock(self, m, platform):

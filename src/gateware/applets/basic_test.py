@@ -47,6 +47,7 @@ class URTITestRequestHandler(ControlRequestHandler):
         interface = self.interface
         setup     = self.interface.setup
         read_data = Signal.like(self.bus.dat_r)
+        read_len  = Signal(2)
 
         # Handler for read register requests.
         m.submodules.transmitter = transmitter = \
@@ -72,6 +73,7 @@ class URTITestRequestHandler(ControlRequestHandler):
                                     self.bus.we                 .eq(0),
                                     self.bus.sel                .eq(1),
                                     self.bus.adr                .eq(setup.index),
+                                    read_len                    .eq(setup.length),
                                 ]
                                 m.next = "READ_WAIT_FOR_ACK"
 
@@ -108,6 +110,7 @@ class URTITestRequestHandler(ControlRequestHandler):
 
                 with m.State("READ_REG_FINISH"):
                     self.handle_simple_data_request(m, transmitter, read_data, length=len(read_data)//8)
+                    m.d.comb += transmitter.max_length.eq(read_len)
 
                 with m.State("WRITE_REG_FINISH"):
                     # Provide an response to the STATUS stage.
@@ -333,7 +336,7 @@ class URTIBasicTestGatewareConnection:
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=gain, index=self.CSR_BASE_ADDR | self.CSR_MAX2120_GAIN_ADDR)
 
     def max2120_read(self, address):
-        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.MAX2120_BASE_ADDR | address, length=2)
+        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.MAX2120_BASE_ADDR | address, length=1)
 
     def max2120_write(self, address, value):
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.MAX2120_BASE_ADDR | address)
@@ -355,6 +358,9 @@ class URTIBasicTestGatewareConnection:
 
     def set_led_pattern(self, pattern):
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=pattern, index=self.CSR_BASE_ADDR | self.CSR_LEDS_ADDR)
+
+    def get_led_pattern(self):
+        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.CSR_BASE_ADDR | self.CSR_LEDS_ADDR, length=1)
 
 
 if __name__ == "__main__":

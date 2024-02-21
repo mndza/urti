@@ -333,19 +333,19 @@ class URTIBasicTestGatewareConnection:
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=gain, index=self.CSR_BASE_ADDR | self.CSR_MAX2120_GAIN_ADDR)
 
     def max2120_read(self, address):
-        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.MAX2120_BASE_ADDR | address)
+        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.MAX2120_BASE_ADDR | address, length=2)
 
     def max2120_write(self, address, value):
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.MAX2120_BASE_ADDR | address)
 
     def rffc5072_rx_read(self, address):
-        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.RFFC5072_RX_BASE_ADDR | address)
+        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.RFFC5072_RX_BASE_ADDR | address, length=2)
 
     def rffc5072_rx_write(self, address, value):
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.RFFC5072_RX_BASE_ADDR | address)
 
     def rffc5072_tx_read(self, address):
-        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.RFFC5072_TX_BASE_ADDR | address)
+        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.RFFC5072_TX_BASE_ADDR | address, length=2)
 
     def rffc5072_tx_write(self, address, value):
         self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.RFFC5072_TX_BASE_ADDR | address)

@@ -90,8 +90,7 @@ class URTIDomainGenerator(LunaDomainGenerator):
             p_FEEDBK_PATH="CLKOP",
 
             # Internal feedback.
-            # i_CLKFB=ClockSignal("fast"),
-            i_CLKFB=0,
+            i_CLKFB=self._clk_240MHz,
 
             # Control signals.
             i_RST=0,

@@ -80,7 +80,7 @@ class RFFC5072RegisterInterface(Component):
         m.d.sync += self.bus.ack.eq(0)
 
         with m.FSM() as fsm:
-            m.d.comb += pads.enx  .eq(~fsm.ongoing("IDLE"))
+            m.d.comb += pads.enx.eq(fsm.ongoing("WRITE_PHASE") | fsm.ongoing("READ_PHASE"))
 
             with m.State('IDLE'):
                 with m.If(self.bus.cyc & self.bus.stb):
@@ -106,7 +106,7 @@ class RFFC5072RegisterInterface(Component):
                     with m.If(bits_write == 0):
                         with m.If(bits_read == 0):
                             m.d.sync += self.bus.ack.eq(1)
-                            m.next = "IDLE"
+                            m.next = "FINISH"
                         with m.Else():
                             m.next = "READ_PHASE"
                     with m.Else():
@@ -122,11 +122,15 @@ class RFFC5072RegisterInterface(Component):
                     with m.If(bits_read == 0):
                         m.d.sync += self.bus.dat_r.eq(shift_reg[:16])
                         m.d.sync += self.bus.ack.eq(1)
-                        m.next = "IDLE"
+                        m.next = "FINISH"
                     with m.Else():
                         m.d.sync += [
                             shift_reg   .eq(Cat(pads.sdata_i, shift_reg)),
                             bits_read   .eq(bits_read - 1),
                         ]
+
+            with m.State("FINISH"):
+                # Wait a cycle to let the master deassert the CYC/STB lines 
+                m.next = "IDLE"
 
         return m

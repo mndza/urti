@@ -201,14 +201,14 @@ class URTIBasicTestGateware(Elaboratable):
         m.submodules.afe_ctrl = afe_ctrl = DomainRenamer("usb")(MAX5865OpModeSetter(pads=max5865_intf, divisor=4))
         # MAX2120 Direct-Conversion Tuner.
         max2120_intf = platform.request("max2120")
-        m.submodules.max2120  = max2120  = DomainRenamer("usb")(MAX2120(pads=max2120_intf))
+        m.submodules.max2120  = max2120  = DomainRenamer("usb")(MAX2120(pads=max2120_intf, divisor=152))
         # RFFC5072 wideband synthesizer / VCO with integrated mixer (RX and TX).
         rffc5072_rx_intf = platform.request("rx_mix_ctrl")
         m.submodules.rffc5072_rx = rffc5072_rx = DomainRenamer("usb")(
-            RFFC5072RegisterInterface(pads=rffc5072_rx_intf, divisor=256, name="rffc5072_rx"))
+            RFFC5072RegisterInterface(pads=rffc5072_rx_intf, divisor=4, name="rffc5072_rx"))
         rffc5072_tx_intf = platform.request("tx_mix_ctrl")
         m.submodules.rffc5072_tx = rffc5072_tx = DomainRenamer("usb")(
-            RFFC5072RegisterInterface(pads=rffc5072_tx_intf, divisor=256, name="rffc5072_tx"))
+            RFFC5072RegisterInterface(pads=rffc5072_tx_intf, divisor=4, name="rffc5072_tx"))
         # MAX2831 RF transceiver (used for TX only).
         max2831_intf = platform.request("max2831")
         m.submodules.max2831 = max2831 = DomainRenamer("usb")(MAX2831(pads=max2831_intf, divisor=4))

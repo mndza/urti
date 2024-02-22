@@ -12,8 +12,9 @@ from amaranth_soc.memory         import MemoryMap
 from luna.gateware.interface.i2c import I2CRegisterInterface
 
 class MAX2120(Component):
-    def __init__(self, *, pads):
+    def __init__(self, *, pads, divisor):
         self.pads = pads
+        self.divisor = divisor
         super().__init__({
             "bus": In(wishbone.Signature(addr_width=4, data_width=8))
         })
@@ -24,7 +25,7 @@ class MAX2120(Component):
 
         # TODO: we may be interested in reading/writing multiple bytes at a time
         # Max I2C clock frequency is 400 kHz
-        m.submodules.i2c_regs = i2c_regs = I2CRegisterInterface(self.pads, period_cyc=100, address=0b1100001)
+        m.submodules.i2c_regs = i2c_regs = I2CRegisterInterface(self.pads, period_cyc=self.divisor, address=0b1100001)
 
         start = Signal()
         m.d.comb += [

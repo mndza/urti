@@ -64,9 +64,13 @@ class MAX2831(Component):
                     m.d.sync += data_sreg.eq(data_sreg << 1)
                     with m.If(rem_bits == 0):
                         m.d.sync += self.bus.ack.eq(1)
-                        m.next = "IDLE"
+                        m.next = "FINISH"
                     with m.Else():
                         m.d.sync += rem_bits.eq(rem_bits - 1)
+            
+            with m.State("FINISH"):
+                # Wait a cycle to let the master deassert the CYC/STB lines 
+                m.next = "IDLE"
 
         return m
 

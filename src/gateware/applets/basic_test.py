@@ -284,6 +284,11 @@ class URTIBasicTestGatewareConnection:
 
     USB_ID  = (0x16d0, 0xf3b)
 
+    # Request numbers
+    REQUEST_READ_REG      = 0
+    REQUEST_WRITE_REG     = 1
+
+    # Base addresses
     MAX2120_BASE_ADDR     = 0x00
     RFFC5072_RX_BASE_ADDR = 0x20
     MAX5865_BASE_ADDR     = 0x40
@@ -291,6 +296,7 @@ class URTIBasicTestGatewareConnection:
     RFFC5072_TX_BASE_ADDR = 0x60
     CSR_BASE_ADDR         = 0x80
 
+    # CSR addresses
     CSR_MAX2120_GAIN_ADDR = 0x00
     CSR_LEDS_ADDR         = 0x01
 
@@ -329,38 +335,45 @@ class URTIBasicTestGatewareConnection:
 
         return bytes(result)
 
+    def write_reg(self, address, value, **kwargs):
+        return self._out_request(self.REQUEST_WRITE_REG, index=address, value=value, **kwargs)
+
+    def read_reg(self, address, length, **kwargs):
+        return self._in_request(self.REQUEST_READ_REG, index=address, length=length, **kwargs)
+
     def max5865_set_opmode(self, opmode):
-        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=opmode, index=self.MAX5865_BASE_ADDR)
+        self.write_reg(self.MAX5865_BASE_ADDR, opmode)
 
     def max2120_set_gain(self, gain):
-        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=gain, index=self.CSR_BASE_ADDR | self.CSR_MAX2120_GAIN_ADDR)
+        self.write_reg(self.CSR_BASE_ADDR | self.CSR_MAX2120_GAIN_ADDR, gain)
 
     def max2120_read(self, address):
-        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.MAX2120_BASE_ADDR | address, length=1)
+        return self.read_reg(self.MAX2120_BASE_ADDR | address, 1)
 
     def max2120_write(self, address, value):
-        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.MAX2120_BASE_ADDR | address)
+        self.write_reg(self.MAX2120_BASE_ADDR | address, value)
 
     def rffc5072_rx_read(self, address):
-        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.RFFC5072_RX_BASE_ADDR | address, length=2)
+        return self.read_reg(self.RFFC5072_RX_BASE_ADDR | address, 2)
 
     def rffc5072_rx_write(self, address, value):
-        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.RFFC5072_RX_BASE_ADDR | address)
+        self.write_reg(self.RFFC5072_RX_BASE_ADDR | address, value)
 
     def rffc5072_tx_read(self, address):
-        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.RFFC5072_TX_BASE_ADDR | address, length=2)
+        return self.read_reg(self.RFFC5072_TX_BASE_ADDR | address, 2)
 
     def rffc5072_tx_write(self, address, value):
-        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.RFFC5072_TX_BASE_ADDR | address)
+        self.write_reg(self.RFFC5072_TX_BASE_ADDR | address, value)
 
     def max2831_write(self, address, value):
-        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=value, index=self.MAX2831_BASE_ADDR | address)
+        self.write_reg(self.MAX2831_BASE_ADDR | address, value)
 
     def set_led_pattern(self, pattern):
-        self._out_request(URTITestRequestHandler.REQUEST_WRITE_REG, value=pattern, index=self.CSR_BASE_ADDR | self.CSR_LEDS_ADDR)
+        self.write_reg(self.CSR_BASE_ADDR | self.CSR_LEDS_ADDR, pattern)
 
     def get_led_pattern(self):
-        return self._in_request(URTITestRequestHandler.REQUEST_READ_REG, index=self.CSR_BASE_ADDR | self.CSR_LEDS_ADDR, length=1)
+        value = self.read_reg(self.CSR_BASE_ADDR | self.CSR_LEDS_ADDR, 1)
+        return int.from_bytes(value)
 
 
 if __name__ == "__main__":

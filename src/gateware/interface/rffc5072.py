@@ -4,11 +4,16 @@
 # Copyright (c) 2024 Great Scott Gadgets <info@greatscottgadgets.com>
 # SPDX-License-Identifier: BSD-3-Clause
 
+import unittest
+
 from amaranth            import Signal, Module, Cat, C, Elaboratable
 from amaranth.lib.cdc    import FFSynchronizer
 from amaranth.lib.wiring import Component, In
 from amaranth_soc        import wishbone
 from amaranth_soc.memory import MemoryMap
+from amaranth.hdl.rec    import Record, DIR_FANIN, DIR_FANOUT
+
+from luna.gateware.test  import LunaGatewareTestCase, sync_test_case
 
 class ThreeWireControllerBus(Elaboratable):
     """
@@ -134,3 +139,92 @@ class RFFC5072RegisterInterface(Component):
                 m.next = "IDLE"
 
         return m
+
+#
+# Tests
+#
+
+class ThreeWirePads(Record):
+    """ Record representing a 3-wire bus. Used for tests. """
+    def __init__(self):
+        super().__init__([
+            ('enx', [('o', 1, DIR_FANOUT)]),
+            ('sclk', [('o', 1, DIR_FANOUT)]),
+            ('sdata', [('i', 1, DIR_FANIN), ('o', 1, DIR_FANOUT), ('oe', 1, DIR_FANOUT)]),
+        ])
+
+class TestRFFC5072RegisterInterface(LunaGatewareTestCase):
+    FRAGMENT_UNDER_TEST = RFFC5072RegisterInterface
+    FRAGMENT_ARGUMENTS  = dict(divisor=4, pads=ThreeWirePads())
+
+    @sync_test_case
+    def test_register_read(self):
+        # Check initial assumptions before the transaction
+        yield
+        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.bus.ack), 0)
+
+        yield from self.advance_cycles(10)
+        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.bus.ack), 0)
+
+        # Request a register read to address 0x19
+        yield self.dut.bus.cyc.eq(1)
+        yield self.dut.bus.stb.eq(1)
+        yield self.dut.bus.we .eq(0)
+        yield self.dut.bus.adr.eq(0x19)
+
+        # Bus should be enabled soon
+        yield from self.wait_until(self.dut.pads.enx, timeout=2*self.dut.divisor)
+
+        # Wait for the transaction to complete, clear the request lines
+        # and ensure the ACK signal only lasts one cycle
+        yield from self.wait_until(self.dut.bus.ack, timeout=32*self.dut.divisor)
+        yield self.dut.bus.cyc.eq(0)
+        yield self.dut.bus.stb.eq(0)
+        yield
+        self.assertEqual((yield self.dut.bus.ack), 0)
+
+        # Check conditions after transaction finish
+        yield from self.advance_cycles(10)
+        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.bus.ack), 0)
+
+
+    @sync_test_case
+    def test_register_write(self):
+        # Check initial assumptions before the transaction
+        yield
+        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.bus.ack), 0)
+
+        yield from self.advance_cycles(10)
+        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.bus.ack), 0)
+
+        # Request a register write to address 0x10
+        yield self.dut.bus.cyc  .eq(1)
+        yield self.dut.bus.stb  .eq(1)
+        yield self.dut.bus.we   .eq(1)
+        yield self.dut.bus.adr  .eq(0x10)
+        yield self.dut.bus.dat_w.eq(0xF50F)
+
+        # Bus should be enabled soon
+        yield from self.wait_until(self.dut.pads.enx, timeout=2*self.dut.divisor)
+
+        # Wait for the transaction to complete, clear the request lines
+        # and ensure the ACK signal only lasts one cycle
+        yield from self.wait_until(self.dut.bus.ack, timeout=32*self.dut.divisor)
+        yield self.dut.bus.cyc.eq(0)
+        yield self.dut.bus.stb.eq(0)
+        yield
+        self.assertEqual((yield self.dut.bus.ack), 0)
+
+        # Check conditions after transaction finish
+        yield from self.advance_cycles(10)
+        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.bus.ack), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

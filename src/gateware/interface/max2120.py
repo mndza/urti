@@ -37,7 +37,6 @@ class MAX2120(Component):
             start                   .eq(
                 self.bus.cyc    &    # Transaction is active.
                 self.bus.stb    &    # Valid data is being provided.
-                self.bus.we     &    # This is a write.
                 self.bus.sel[0] &    # The relevant data lane is being targeted.
                 ~i2c_regs.busy       # The I2C register interface is idle.
             ),

@@ -116,6 +116,7 @@ class MAX5865OpModeSetter(Component):
                     with m.Else():
                         # Dummy read request
                         m.d.sync += self.bus.ack.eq(1)
+                        m.next = "FINISH"
 
             with m.State("XMIT"):
                 m.d.sync += clock_period.eq(clock_period + 1)
@@ -123,9 +124,13 @@ class MAX5865OpModeSetter(Component):
                     m.d.sync += opmode_sreg.eq(opmode_sreg << 1)
                     with m.If(rem_bits == 0):
                         m.d.sync += self.bus.ack.eq(1)
-                        m.next = "IDLE"
+                        m.next = "FINISH"
                     with m.Else():
                         m.d.sync += rem_bits.eq(rem_bits - 1)
+
+            with m.State("FINISH"):
+                # Wait a cycle to let the master deassert the CYC/STB lines 
+                m.next = "IDLE"
 
         return m
 

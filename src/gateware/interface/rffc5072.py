@@ -8,12 +8,14 @@ import unittest
 
 from amaranth            import Signal, Module, Cat, C, Elaboratable
 from amaranth.lib.cdc    import FFSynchronizer
-from amaranth.lib.wiring import Component, In
+from amaranth.lib.wiring import Component, In, Out, Signature
 from amaranth_soc        import wishbone
 from amaranth_soc.memory import MemoryMap
-from amaranth.hdl.rec    import Record, DIR_FANIN, DIR_FANOUT
 
 from luna.gateware.test  import LunaGatewareTestCase, sync_test_case
+
+__all__ = ["RFFC5072RegisterInterface"]
+
 
 class ThreeWireControllerBus(Elaboratable):
     """
@@ -51,6 +53,8 @@ class RFFC5072RegisterInterface(Component):
     """
     Simple register interface for RFFC5072 three-wire bus.
     """
+    bus: In(wishbone.Signature(addr_width=5, data_width=16))
+    
     def __init__(self, *, pads, divisor, name=None):
         """
         Parameters:
@@ -60,10 +64,7 @@ class RFFC5072RegisterInterface(Component):
         assert divisor & (divisor - 1) == 0, "divisor must be a power of 2"
         self.divisor = divisor
         self.pads    = ThreeWireControllerBus(pads)
-
-        super().__init__({
-            "bus": In(wishbone.Signature(addr_width=5, data_width=16))  # address is actually 7 bits
-        })
+        super().__init__()
         self.bus.memory_map = MemoryMap(addr_width=5, data_width=16, name=name or "rffc5072")
 
 
@@ -88,7 +89,7 @@ class RFFC5072RegisterInterface(Component):
             m.d.comb += pads.enx.eq(fsm.ongoing("WRITE_PHASE") | fsm.ongoing("READ_PHASE"))
 
             with m.State('IDLE'):
-                with m.If(self.bus.cyc & self.bus.stb):
+                with m.If(self.bus.cyc & self.bus.stb & ~self.bus.ack):
                     m.d.sync += clock_period.eq(0)
                     with m.If(self.bus.we):
                         m.d.sync += [
@@ -111,7 +112,7 @@ class RFFC5072RegisterInterface(Component):
                     with m.If(bits_write == 0):
                         with m.If(bits_read == 0):
                             m.d.sync += self.bus.ack.eq(1)
-                            m.next = "FINISH"
+                            m.next = "IDLE"
                         with m.Else():
                             m.next = "READ_PHASE"
                     with m.Else():
@@ -127,16 +128,12 @@ class RFFC5072RegisterInterface(Component):
                     with m.If(bits_read == 0):
                         m.d.sync += self.bus.dat_r.eq(shift_reg[:16])
                         m.d.sync += self.bus.ack.eq(1)
-                        m.next = "FINISH"
+                        m.next = "IDLE"
                     with m.Else():
                         m.d.sync += [
                             shift_reg   .eq(Cat(pads.sdata_i, shift_reg)),
                             bits_read   .eq(bits_read - 1),
                         ]
-
-            with m.State("FINISH"):
-                # Wait a cycle to let the master deassert the CYC/STB lines 
-                m.next = "IDLE"
 
         return m
 
@@ -144,18 +141,16 @@ class RFFC5072RegisterInterface(Component):
 # Tests
 #
 
-class ThreeWirePads(Record):
-    """ Record representing a 3-wire bus. Used for tests. """
-    def __init__(self):
-        super().__init__([
-            ('enx', [('o', 1, DIR_FANOUT)]),
-            ('sclk', [('o', 1, DIR_FANOUT)]),
-            ('sdata', [('i', 1, DIR_FANIN), ('o', 1, DIR_FANOUT), ('oe', 1, DIR_FANOUT)]),
-        ])
+pin_o  = Signature({"o": Out(1)})
+pin_io = Signature({"i": In(1), "o": Out(1), "oe": Out(1)})
 
 class TestRFFC5072RegisterInterface(LunaGatewareTestCase):
     FRAGMENT_UNDER_TEST = RFFC5072RegisterInterface
-    FRAGMENT_ARGUMENTS  = dict(divisor=4, pads=ThreeWirePads())
+    FRAGMENT_ARGUMENTS  = dict(divisor=4, pads=Signature({
+        "enx":   Out(pin_o),
+        "sclk":  Out(pin_o),
+        "sdata": Out(pin_io),
+    }).create())
 
     @sync_test_case
     def test_register_read(self):

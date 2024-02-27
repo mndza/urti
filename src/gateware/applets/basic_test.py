@@ -24,10 +24,8 @@ from luna.gateware.usb.usb2.transfer            import USBInStreamInterface
 from luna.gateware.stream.generator             import StreamSerializer
 
 from urti.gateware.architecture.car             import URTIDomainGenerator
-from urti.gateware.interface.max5865            import MAX5865DataInterface, MAX5865OpModeSetter
-from urti.gateware.interface.max2120            import MAX2120
-from urti.gateware.interface.max2831            import MAX2831
-from urti.gateware.interface.rffc5072           import RFFC5072RegisterInterface
+from urti.gateware.interface                    import \
+    MAX5865DataInterface, MAX5865OpModeSetter, MAX2120, MAX2831, RFFC5072RegisterInterface
 
 
 class URTITestRequestHandler(ControlRequestHandler):

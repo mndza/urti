@@ -97,7 +97,11 @@ class URTITestRequestHandler(ControlRequestHandler):
                             read_data       .eq(self.bus.dat_r),
                         ]
                         m.next = "READ_REG_FINISH"
-                
+
+                    # Tell the host we are not ready for the DATA/STATUS stages yet
+                    with m.If(interface.data_requested | interface.status_requested):
+                        m.d.comb += interface.handshakes_out.nak.eq(1)
+
                 with m.State("WRITE_WAIT_FOR_ACK"):
                     with m.If(self.bus.ack):
                         m.d.usb += [
@@ -105,6 +109,10 @@ class URTITestRequestHandler(ControlRequestHandler):
                             self.bus.stb    .eq(0),
                         ]
                         m.next = "WRITE_REG_FINISH"
+
+                    # Tell the host we are not ready for the STATUS stage yet
+                    with m.If(interface.status_requested):
+                        m.d.comb += interface.handshakes_out.nak.eq(1)
 
                 with m.State("READ_REG_FINISH"):
                     self.handle_simple_data_request(m, transmitter, read_data, length=len(read_data)//8)

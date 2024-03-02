@@ -33,7 +33,10 @@ class MAX2120(Component):
         m.submodules.i2c_regs = i2c_regs = I2CRegisterInterface(self.pads, period_cyc=self.divisor, address=0b1100001)
 
         start = Signal()
+        done  = Signal()
+
         m.d.comb += [
+            i2c_regs.size           .eq(1),
             i2c_regs.address        .eq(self.bus.adr),
 
             i2c_regs.write_data     .eq(self.bus.dat_w),
@@ -49,8 +52,19 @@ class MAX2120(Component):
             i2c_regs.read_request   .eq(start & ~self.bus.we),
             i2c_regs.write_request  .eq(start &  self.bus.we),
 
-            self.bus.ack            .eq(i2c_regs.done),
+            self.bus.ack            .eq(done),
         ]
+
+        # Workaround to stop a request when it failed, as the I2C submodule does
+        # not expose a request abort flag (yet?).
+        with m.FSM():
+            with m.State("IDLE"):
+                with m.If(~i2c_regs.busy & start):
+                    m.next = "BUSY"
+            with m.State("BUSY"):
+                with m.If(~i2c_regs.busy | i2c_regs.done):
+                    m.d.comb += done.eq(1)
+                    m.next = "IDLE"
 
         return m
 
@@ -65,6 +79,9 @@ class TestMAX2120(LunaGatewareTestCase):
     
     @sync_test_case
     def test_register_read(self):
+        # Keep the input data tied to 0 to simulate ACKs
+        yield self.dut.pads.sda.i.eq(0)
+
         # Check initial assumptions before the transaction
         yield
         self.assertEqual((yield self.dut.pads.scl.o), 0)
@@ -80,11 +97,10 @@ class TestMAX2120(LunaGatewareTestCase):
         yield self.dut.bus.we .eq(0)
         yield self.dut.bus.adr.eq(0x7)
 
-        # FIXME: Need to assert the I2C ACK line here
-
         # Wait for the transaction to complete, clear the request lines
         # and ensure the ACK signal only lasts one cycle
-        yield from self.wait_until(self.dut.bus.ack, timeout=5)
+
+        yield from self.wait_until(self.dut.bus.ack, timeout=100*self.dut.divisor)
         yield self.dut.bus.cyc.eq(0)
         yield self.dut.bus.stb.eq(0)
         yield
@@ -97,6 +113,9 @@ class TestMAX2120(LunaGatewareTestCase):
 
     @sync_test_case
     def test_register_write(self):
+        # Keep the input data tied to 0 to simulate ACKs
+        yield self.dut.pads.sda.i.eq(0)
+
         # Check initial assumptions before the transaction
         yield
         self.assertEqual((yield self.dut.pads.scl.o), 0)
@@ -113,11 +132,9 @@ class TestMAX2120(LunaGatewareTestCase):
         yield self.dut.bus.adr  .eq(0x7)
         yield self.dut.bus.dat_w.eq(3)
 
-        # FIXME: Need to assert the I2C ACK line here
-
         # Wait for the transaction to complete, clear the request lines
         # and ensure the ACK signal only lasts one cycle
-        yield from self.wait_until(self.dut.bus.ack, timeout=20*self.dut.divisor)
+        yield from self.wait_until(self.dut.bus.ack, timeout=100*self.dut.divisor)
         yield self.dut.bus.cyc.eq(0)
         yield self.dut.bus.stb.eq(0)
         yield

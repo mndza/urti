@@ -43,6 +43,7 @@ class RFFC5072RegisterInterface(Component):
         shift_reg  = Signal(8+16)
         bits_write = Signal(range(16+8+1))
         bits_read  = Signal(range(16+1+1))  # +1 cycle to account for read delay
+        nop_cycles = Signal(1)
 
         clock_period = Signal(range(cycles))
         m.d.comb += pads.sclk.o.eq(clock_period[-1])
@@ -72,10 +73,24 @@ class RFFC5072RegisterInterface(Component):
                             bits_write  .eq(8),
                             bits_read   .eq(16+1),
                         ]
-                    m.next = "WRITE_PHASE"
+                    # The device requires two clock cycles while ENX is not asserted 
+                    # before a serial transaction. This is not clearly documented.
+                    m.d.sync += nop_cycles.eq(1)
+                    m.next = "PREAMBLE"
+
+            with m.State("PREAMBLE"):
+                m.d.sync += clock_period.eq(clock_period + 1)
+                with m.If(falling_edge):
+                    with m.If(nop_cycles == 0):
+                        m.next = "WRITE_PHASE"
+                    with m.Else():
+                        m.d.sync += nop_cycles.eq(nop_cycles - 1)
 
             with m.State("WRITE_PHASE"):
-                m.d.comb += pads.sdata.oe.eq(1)
+                m.d.comb += [
+                    pads.enx.o.eq(1),
+                    pads.sdata.oe.eq(1),
+                ]
                 m.d.sync += clock_period.eq(clock_period + 1)
                 with m.If(falling_edge):
                     with m.If(bits_write == 0):
@@ -97,12 +112,23 @@ class RFFC5072RegisterInterface(Component):
                     with m.If(bits_read == 0):
                         m.d.sync += self.bus.dat_r.eq(shift_reg[:16])
                         m.d.sync += self.bus.ack.eq(1)
-                        m.next = "IDLE"
+                        # The device requires a clock cycle while ENX is not asserted 
+                        # after a serial transaction. This is not clearly documented.
+                        m.d.sync += nop_cycles.eq(0)
+                        m.next = "POSTAMBLE"
                     with m.Else():
                         m.d.sync += [
                             shift_reg   .eq(Cat(pads.sdata.i, shift_reg)),
                             bits_read   .eq(bits_read - 1),
                         ]
+
+            with m.State("POSTAMBLE"):
+                m.d.sync += clock_period.eq(clock_period + 1)
+                with m.If(falling_edge):
+                    with m.If(nop_cycles == 0):
+                        m.next = "IDLE"
+                    with m.Else():
+                        m.d.sync += nop_cycles.eq(nop_cycles - 1)
 
         return m
 

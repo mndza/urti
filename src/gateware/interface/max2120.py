@@ -19,9 +19,10 @@ __all__ = ["MAX2120"]
 class MAX2120(Component):
     bus: In(wishbone.Signature(addr_width=4, data_width=8))
 
-    def __init__(self, *, pads, divisor):
+    def __init__(self, *, pads, divisor, address=0b1100000):
         self.pads = pads
         self.divisor = divisor
+        self.address = address
         super().__init__()
         self.bus.memory_map = MemoryMap(addr_width=4, data_width=8, name="max2120")
 
@@ -30,7 +31,7 @@ class MAX2120(Component):
 
         # TODO: we may be interested in reading/writing multiple bytes at a time
         # Max I2C clock frequency is 400 kHz
-        m.submodules.i2c_regs = i2c_regs = I2CRegisterInterface(self.pads, period_cyc=self.divisor, address=0b1100001)
+        m.submodules.i2c_regs = i2c_regs = I2CRegisterInterface(self.pads, period_cyc=self.divisor, address=self.address)
 
         start = Signal()
         done  = Signal()

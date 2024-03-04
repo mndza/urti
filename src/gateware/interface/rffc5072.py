@@ -6,8 +6,7 @@
 
 import unittest
 
-from amaranth            import Signal, Module, Cat, C, Elaboratable
-from amaranth.lib.cdc    import FFSynchronizer
+from amaranth            import Signal, Module, Cat, C
 from amaranth.lib.wiring import Component, In, Out, Signature
 from amaranth_soc        import wishbone
 from amaranth_soc.memory import MemoryMap
@@ -15,38 +14,6 @@ from amaranth_soc.memory import MemoryMap
 from luna.gateware.test  import LunaGatewareTestCase, sync_test_case
 
 __all__ = ["RFFC5072RegisterInterface"]
-
-
-class ThreeWireControllerBus(Elaboratable):
-    """
-    3-wire controller bus
-    
-    Provides synchronization.
-    """
-    def __init__(self, pads):
-        self.pads     = pads
-
-        self.enx      = Signal()
-        self.sclk     = Signal()
-        self.sdata_oe = Signal()
-        self.sdata_o  = Signal()
-        self.sdata_i  = Signal()
-
-    def elaborate(self, platform):
-        m = Module()
-
-        m.d.comb += [
-            self.pads.enx.o      .eq(self.enx),
-            self.pads.sclk.o     .eq(self.sclk),
-            self.pads.sdata.oe   .eq(self.sdata_oe),
-            self.pads.sdata.o    .eq(self.sdata_o),
-        ]
-
-        m.submodules += [
-            FFSynchronizer(self.pads.sdata.i, self.sdata_i, reset=1),
-        ]
-
-        return m
 
 
 class RFFC5072RegisterInterface(Component):
@@ -63,7 +30,7 @@ class RFFC5072RegisterInterface(Component):
         """
         assert divisor & (divisor - 1) == 0, "divisor must be a power of 2"
         self.divisor = divisor
-        self.pads    = ThreeWireControllerBus(pads)
+        self.pads    = pads
         super().__init__()
         self.bus.memory_map = MemoryMap(addr_width=5, data_width=16, name=name or "rffc5072")
 
@@ -71,26 +38,28 @@ class RFFC5072RegisterInterface(Component):
     def elaborate(self, platform):
         m = Module()
 
-        m.submodules.pads = pads = self.pads
-
         cycles     = self.divisor
+        pads       = self.pads
         shift_reg  = Signal(8+16)
         bits_write = Signal(range(16+8+1))
         bits_read  = Signal(range(16+1+1))  # +1 cycle to account for read delay
 
         clock_period = Signal(range(cycles))
-        m.d.comb += pads.sclk.eq(clock_period[-1])
+        m.d.comb += pads.sclk.o.eq(clock_period[-1])
 
         falling_edge = clock_period == cycles - 1
 
         m.d.sync += self.bus.ack.eq(0)
 
         with m.FSM() as fsm:
-            m.d.comb += pads.enx.eq(fsm.ongoing("WRITE_PHASE") | fsm.ongoing("READ_PHASE"))
+            m.d.comb += pads.enx.o.eq(~fsm.ongoing("IDLE"))
 
             with m.State('IDLE'):
+                m.d.sync += [
+                    clock_period.eq(0),
+                    pads.sdata.o.eq(0),
+                ]
                 with m.If(self.bus.cyc & self.bus.stb & ~self.bus.ack):
-                    m.d.sync += clock_period.eq(0)
                     with m.If(self.bus.we):
                         m.d.sync += [
                             shift_reg   .eq(Cat(self.bus.dat_w, self.bus.adr, 0, 0, 0)),
@@ -106,7 +75,7 @@ class RFFC5072RegisterInterface(Component):
                     m.next = "WRITE_PHASE"
 
             with m.State("WRITE_PHASE"):
-                m.d.comb += pads.sdata_oe.eq(1)
+                m.d.comb += pads.sdata.oe.eq(1)
                 m.d.sync += clock_period.eq(clock_period + 1)
                 with m.If(falling_edge):
                     with m.If(bits_write == 0):
@@ -117,7 +86,7 @@ class RFFC5072RegisterInterface(Component):
                             m.next = "READ_PHASE"
                     with m.Else():
                         m.d.sync += [
-                            pads.sdata_o .eq(shift_reg[-1]),
+                            pads.sdata.o.eq(shift_reg[-1]),
                             shift_reg   .eq(shift_reg << 1),
                             bits_write  .eq(bits_write - 1),
                         ]
@@ -131,7 +100,7 @@ class RFFC5072RegisterInterface(Component):
                         m.next = "IDLE"
                     with m.Else():
                         m.d.sync += [
-                            shift_reg   .eq(Cat(pads.sdata_i, shift_reg)),
+                            shift_reg   .eq(Cat(pads.sdata.i, shift_reg)),
                             bits_read   .eq(bits_read - 1),
                         ]
 
@@ -156,11 +125,11 @@ class TestRFFC5072RegisterInterface(LunaGatewareTestCase):
     def test_register_read(self):
         # Check initial assumptions before the transaction
         yield
-        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.pads.enx.o), 0)
         self.assertEqual((yield self.dut.bus.ack), 0)
 
         yield from self.advance_cycles(10)
-        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.pads.enx.o), 0)
         self.assertEqual((yield self.dut.bus.ack), 0)
 
         # Request a register read to address 0x19
@@ -170,7 +139,7 @@ class TestRFFC5072RegisterInterface(LunaGatewareTestCase):
         yield self.dut.bus.adr.eq(0x19)
 
         # Bus should be enabled soon
-        yield from self.wait_until(self.dut.pads.enx, timeout=2*self.dut.divisor)
+        yield from self.wait_until(self.dut.pads.enx.o, timeout=2*self.dut.divisor)
 
         # Wait for the transaction to complete, clear the request lines
         # and ensure the ACK signal only lasts one cycle
@@ -182,7 +151,7 @@ class TestRFFC5072RegisterInterface(LunaGatewareTestCase):
 
         # Check conditions after transaction finish
         yield from self.advance_cycles(10)
-        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.pads.enx.o), 0)
         self.assertEqual((yield self.dut.bus.ack), 0)
 
 
@@ -190,11 +159,11 @@ class TestRFFC5072RegisterInterface(LunaGatewareTestCase):
     def test_register_write(self):
         # Check initial assumptions before the transaction
         yield
-        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.pads.enx.o), 0)
         self.assertEqual((yield self.dut.bus.ack), 0)
 
         yield from self.advance_cycles(10)
-        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.pads.enx.o), 0)
         self.assertEqual((yield self.dut.bus.ack), 0)
 
         # Request a register write to address 0x10
@@ -205,7 +174,7 @@ class TestRFFC5072RegisterInterface(LunaGatewareTestCase):
         yield self.dut.bus.dat_w.eq(0xF50F)
 
         # Bus should be enabled soon
-        yield from self.wait_until(self.dut.pads.enx, timeout=2*self.dut.divisor)
+        yield from self.wait_until(self.dut.pads.enx.o, timeout=2*self.dut.divisor)
 
         # Wait for the transaction to complete, clear the request lines
         # and ensure the ACK signal only lasts one cycle
@@ -217,7 +186,7 @@ class TestRFFC5072RegisterInterface(LunaGatewareTestCase):
 
         # Check conditions after transaction finish
         yield from self.advance_cycles(10)
-        self.assertEqual((yield self.dut.pads.enx), 0)
+        self.assertEqual((yield self.dut.pads.enx.o), 0)
         self.assertEqual((yield self.dut.bus.ack), 0)
 
 

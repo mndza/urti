@@ -10,6 +10,7 @@ from amaranth.build import *
 from amaranth_boards.resources import *
 
 from .core import URTIPlatform
+from .adv import control_phy_hook
 
 __all__ = ["URTIPlatformRev0D1"]
 
@@ -181,7 +182,7 @@ class URTIPlatformRev0D1(URTIPlatform):
         ),
 
         # Advertisement output to microcontroller.
-        Resource("adv", 0, Pins("R14", dir="o"), Attrs(IO_TYPE="LVCMOS33")),
+        Resource("int", 0, Pins("R14", dir="o"), Attrs(IO_TYPE="LVCMOS33")),
 
         # USER button
         Resource("button_user", 0, PinsN("T14", dir="i"), Attrs(IO_TYPE="LVCMOS33", PULLMODE="NONE")),
@@ -215,3 +216,7 @@ class URTIPlatformRev0D1(URTIPlatform):
         Connector("mezzanine", 0,
             "- - R4 T4 R5 M4 N3 N4 P4 L3 K5 L1 L2 - - - - M1 M2 N1 P2 P1 P3 R1 R2 T2 R3 T3 - -"),
     ]
+
+    usb_device_hooks = {
+        "usb_phy_0": control_phy_hook
+    }

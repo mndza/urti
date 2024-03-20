@@ -15,7 +15,9 @@ readme = "README.md"
 dependencies = [
     "amaranth @ git+https://github.com/amaranth-lang/amaranth",
     "amaranth-soc @ git+https://github.com/amaranth-lang/amaranth-soc",
-    "luna @ git+https://github.com/mndza/luna.git@remove-deprecated-helpers",
+    "amaranth-stdio @ git+https://github.com/amaranth-lang/amaranth-stdio",
+    "apollo_fpga @ git+https://github.com/mndza/apollo.git@add-gateware-deps",
+    "luna @ git+https://github.com/mndza/luna@amaranth-from-git",
     "pyusb",
     "future",
     "pyfwup>=0.2",

@@ -38,8 +38,8 @@ class MAX2831(Component):
         rem_bits     = Signal(range(18))
 
         m.d.comb += [
-            pads.din  .eq(data_sreg[-1]),
-            pads.sclk .eq(clock_period[-1]),
+            pads.din.o .eq(data_sreg[-1]),
+            pads.sclk.o.eq(clock_period[-1]),
         ]
         falling_edge = clock_period == cycles - 1
 
@@ -47,7 +47,7 @@ class MAX2831(Component):
         m.d.sync += self.bus.ack  .eq(0)
 
         with m.FSM() as fsm:
-            m.d.comb += pads.cs.eq(fsm.ongoing("XMIT"))
+            m.d.comb += pads.cs.o.eq(fsm.ongoing("XMIT"))
 
             with m.State("IDLE"):
                 with m.If(self.bus.cyc & self.bus.stb & ~self.bus.ack):

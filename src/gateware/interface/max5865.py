@@ -37,7 +37,7 @@ class MAX5865DataInterface(Elaboratable):
             m.submodules += [
                 Instance("DELAYG",
                     p_DEL_MODE="SCLK_CENTERED",
-                    i_A=self.pads.da[i],
+                    i_A=self.pads.da.i[i],
                     o_Z=da_delay,
                 ),
                 Instance("IDDRX1F",
@@ -58,7 +58,7 @@ class MAX5865DataInterface(Elaboratable):
                     i_D1=self.dac_data_q[i],
                     i_SCLK=ClockSignal(),
                     i_RST=ResetSignal(),
-                    o_Q=self.pads.dd[i],
+                    o_Q=self.pads.dd.o[i],
                 ),
             ]
 
@@ -98,8 +98,8 @@ class MAX5865OpModeSetter(Component):
         rem_bits     = Signal(range(8))
 
         m.d.comb += [
-            bus.pico .eq(opmode_sreg[-1]),
-            bus.sck  .eq(clock_period[-1]),
+            bus.pico.o .eq(opmode_sreg[-1]),
+            bus.sck.o  .eq(clock_period[-1]),
         ]
         falling_edge = clock_period == cycles - 1
 
@@ -107,7 +107,7 @@ class MAX5865OpModeSetter(Component):
         m.d.sync += self.bus.ack  .eq(0)
 
         with m.FSM() as fsm:
-            m.d.comb += bus.cs.eq(fsm.ongoing("XMIT"))
+            m.d.comb += bus.cs.o.eq(fsm.ongoing("XMIT"))
 
             with m.State("IDLE"):
                 with m.If(self.bus.cyc & self.bus.stb & ~self.bus.ack):

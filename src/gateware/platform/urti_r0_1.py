@@ -101,9 +101,12 @@ class URTIPlatformRev0D1(URTIPlatform):
         Resource("rx_mix_ctrl", 0,
             Subsignal("fm",     Pins("A6",  dir="io")),
             Subsignal("ld",     Pins("B6",  dir="i")),
-            Subsignal("enbl",   Pins("A5",  dir="io")),
-            Subsignal("mode",   Pins("B5",  dir="io")),
+            Subsignal("enbl",   Pins("A5",  dir="o")),
+            Subsignal("mode",   Pins("B5",  dir="o")),
             Subsignal("reset",  PinsN("A7", dir="o")),
+            Attrs(IO_TYPE="LVCMOS33")
+        ),
+        Resource("rx_mix_serial", 0,
             # 3-wire serial interface
             Subsignal("enx",    PinsN("B7", dir="o")),
             Subsignal("sclk",   Pins("A4",  dir="o")),
@@ -131,9 +134,12 @@ class URTIPlatformRev0D1(URTIPlatform):
         Resource("tx_mix_ctrl", 0,
             Subsignal("fm",     Pins("K14",  dir="io")),
             Subsignal("ld",     Pins("K15",  dir="i")),
-            Subsignal("enbl",   Pins("H15",  dir="io")),
-            Subsignal("mode",   Pins("J15",  dir="io")),
+            Subsignal("enbl",   Pins("H15",  dir="o")),
+            Subsignal("mode",   Pins("J15",  dir="o")),
             Subsignal("reset",  PinsN("C15", dir="o")),
+            Attrs(IO_TYPE="LVCMOS33")
+        ),
+        Resource("tx_mix_serial", 0,
             # 3-wire serial interface
             Subsignal("enx",    PinsN("F16", dir="o")),
             Subsignal("sclk",   Pins("G15",  dir="o")),

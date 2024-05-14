@@ -7,6 +7,8 @@
 import usb
 import time
 import math
+import os
+import posix
 
 from amaranth                                   import Elaboratable, Module, Signal, Cat, DomainRenamer
 from amaranth.lib.fifo                          import AsyncFIFO
@@ -19,7 +21,7 @@ from usb_protocol.emitters                      import DeviceDescriptorCollectio
 from usb_protocol.types                         import USBRequestType
 
 from luna                                       import top_level_cli
-from luna.usb2                                  import USBDevice, USBStreamInEndpoint
+from luna.usb2                                  import USBDevice, USBMultibyteStreamInEndpoint
 from luna.gateware.usb.request.control          import ControlRequestHandler
 from luna.gateware.usb.usb2.transfer            import USBInStreamInterface
 from luna.gateware.stream.generator             import StreamSerializer
@@ -28,6 +30,7 @@ from urti.gateware.architecture.car             import URTIDomainGenerator
 from urti.gateware.interface                    import \
     MAX5865DataInterface, MAX5865OpModeSetter, MAX2120, MAX2831, RFFC5072RegisterInterface
 
+from urti.gateware.blocks.fir                   import HalfBandFilter
 
 class URTITestRequestHandler(ControlRequestHandler):
     REQUEST_READ_REG   = 0
@@ -273,8 +276,9 @@ class URTIBasicTestGateware(Elaboratable):
         # Connect our request handler to the Wshbone decoder.
         connect(m, req_handler.bus, decoder.bus)
 
-        # Add a stream endpoint to our device with samples truncated to 4 bits.
-        stream_ep = USBStreamInEndpoint(
+        # Add a stream endpoint to our device for sending RX samples.
+        stream_ep = USBMultibyteStreamInEndpoint(
+            byte_width=2,
             endpoint_number=self.BULK_ENDPOINT_NUMBER,
             max_packet_size=self.MAX_BULK_PACKET_SIZE
         )
@@ -282,10 +286,26 @@ class URTIBasicTestGateware(Elaboratable):
 
         # Async FIFOs for interfacing with the AFE, cross-domain clocking.
         # TODO: Write only when reception is enabled.
-        m.submodules.rx_fifo = rx_fifo = AsyncFIFO(width=8, depth=64, r_domain="usb", w_domain="radio")
+        m.submodules.rx_fifo = rx_fifo = AsyncFIFO(width=16, depth=128, r_domain="usb", w_domain="radio")
+
+        # Insert a half-band decimate-by-2 filter between the AFE and the FIFO.
+        taps = [-2, 0, 7, 0, -18, 0, 41, 0, -92, 0, 320, 512, 320, 0, -92, 0, 41, 0, -18, 0, 7, 0, -2]
+        m.submodules.fir_re = fir_re = DomainRenamer("radio")(HalfBandFilter(8, taps))
+        m.submodules.fir_im = fir_im = DomainRenamer("radio")(HalfBandFilter(8, taps))
         m.d.comb += [
-            rx_fifo.w_data              .eq(Cat(afe_data.adc_data_i[:4], afe_data.adc_data_q[:4])),
-            rx_fifo.w_en                .eq(1),
+            # Connect decimators input.
+            fir_re.input.data           .eq(afe_data.adc_data_i - 128),  # convert from offset binary
+            fir_re.input.valid          .eq(1),
+            fir_im.input.data           .eq(afe_data.adc_data_q - 128),
+            fir_im.input.valid          .eq(1),
+
+            # Output from the decimators is fed to the FIFO.
+            rx_fifo.w_data              .eq(Cat(fir_im.output.data, fir_re.output.data)),
+            rx_fifo.w_en                .eq(fir_re.output.valid & fir_im.output.valid),
+            fir_re.output.ready         .eq(rx_fifo.w_rdy),
+            fir_im.output.ready         .eq(rx_fifo.w_rdy),
+
+            # USB endpoint reads samples from the FIFO.
             stream_ep.stream.payload    .eq(rx_fifo.r_data),
             stream_ep.stream.valid      .eq(rx_fifo.r_rdy),
             rx_fifo.r_en                .eq(stream_ep.stream.ready),
@@ -400,6 +420,22 @@ class URTIBasicTestGatewareConnection:
     def get_led_pattern(self):
         value = self.read_reg(self.CSR_BASE_ADDR | self.CSR_LEDS_ADDR, 1)
         return int.from_bytes(value)
+
+    def pipe_rx(self, length=16*1024):
+        pipe_path = "/tmp/urti_rx"
+
+        try:
+            posix.mkfifo(pipe_path)
+            print("Named pipe created successfully!")
+        except FileExistsError:
+            print("Named pipe already exists!")
+        except OSError as e:
+            print(f"Named pipe creation failed: {e}")
+
+        pipe = open(pipe_path, "wb")
+        while True:
+            data = self.device.read(0x81, length)
+            pipe.write(data)
 
 
 class MAX2120_control:
@@ -585,7 +621,12 @@ if __name__ == "__main__":
 
     max2120 = MAX2120_control(urti)
     max2120.set_freq(1000e6)
+    urti.max5865_set_opmode(2)
+    urti.set_led_pattern(1)
+
     rffc5072 = RFFC5072_control(urti)
     rffc5072.set_freq(400e6)
     max2120.set_bb_gain(8)
     urti.max2120_set_gain(40)
+
+    # urti.pipe_rx()

@@ -52,8 +52,7 @@ class RFFC5072RegisterInterface(Component):
 
         m.d.sync += self.bus.ack.eq(0)
 
-        with m.FSM() as fsm:
-            m.d.comb += pads.enx.o.eq(~fsm.ongoing("IDLE"))
+        with m.FSM():
 
             with m.State('IDLE'):
                 m.d.sync += [
@@ -107,6 +106,7 @@ class RFFC5072RegisterInterface(Component):
                         ]
                         
             with m.State("READ_PHASE"):
+                m.d.comb += pads.enx.o.eq(1)
                 m.d.sync += clock_period.eq(clock_period + 1)
                 with m.If(falling_edge):
                     with m.If(bits_read == 0):
@@ -165,7 +165,7 @@ class TestRFFC5072RegisterInterface(LunaGatewareTestCase):
         yield self.dut.bus.adr.eq(0x19)
 
         # Bus should be enabled soon
-        yield from self.wait_until(self.dut.pads.enx.o, timeout=2*self.dut.divisor)
+        yield from self.wait_until(self.dut.pads.enx.o, timeout=10*self.dut.divisor)
 
         # Wait for the transaction to complete, clear the request lines
         # and ensure the ACK signal only lasts one cycle
@@ -200,7 +200,7 @@ class TestRFFC5072RegisterInterface(LunaGatewareTestCase):
         yield self.dut.bus.dat_w.eq(0xF50F)
 
         # Bus should be enabled soon
-        yield from self.wait_until(self.dut.pads.enx.o, timeout=2*self.dut.divisor)
+        yield from self.wait_until(self.dut.pads.enx.o, timeout=10*self.dut.divisor)
 
         # Wait for the transaction to complete, clear the request lines
         # and ensure the ACK signal only lasts one cycle

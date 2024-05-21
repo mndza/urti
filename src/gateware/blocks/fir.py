@@ -25,28 +25,33 @@ class Stream(wiring.Signature):
         super().__init__(members)
 
 
-class HalfBandFilter(wiring.Component):
-    def __init__(self, width, taps):
+class HalfBandDecimationFilter(wiring.Component):
+    def __init__(self, taps, shape_in, delay=0, shape_out=None):
         midtap = taps[len(taps)//2]
         assert taps[1::2] == [0]*(len(taps)//4) + [midtap] + [0]*(len(taps)//4)
         self.taps = taps
-        self.width  = width
+        self.shape_in = shape_in
+        self.delay = delay
+
+        if shape_out is None:
+            # If output shape is not defined, add normalized DC gain
+            shape_out = signed(bits_for(-2**(shape_in.width-1) * sum(taps)))
 
         super().__init__({
-            "input":  In(Stream(signed(width))),
-            "output": Out(Stream(signed(width))),
+            "input":  In(Stream(shape_in)),
+            "output": Out(Stream(shape_out)),
         })
 
     def elaborate(self, platform):
         m = Module()
 
         # Arms
-        m.submodules.fir0 = fir0 = FIRFilter(self.taps[0::2], signed(self.width))
-        m.submodules.fir1 = fir1 = FIRFilter(self.taps[1::2], signed(self.width))
+        m.submodules.fir0 = fir0 = FIRFilter(self.taps[0::2], self.shape_in)
+        m.submodules.fir1 = fir1 = FIRFilter(self.taps[1::2], self.shape_in)
         arms = [fir0, fir1]
 
         # Arm index selection: switch after every delivered sample
-        arm_index = Signal(range(2), init=1)
+        arm_index = Signal(range(2), init=self.delay)
         with m.If(self.input.ready & self.input.valid):
             m.d.sync += arm_index.eq(arm_index - 1)
 
@@ -70,14 +75,62 @@ class HalfBandFilter(wiring.Component):
                 else:
                     m.d.sync += accumulator.eq(accumulator + arm.output.data)
         
-        if len(self.output.data) < len(accumulator):
-            m.d.comb += self.output.data.eq(round_to_zero(accumulator, len(self.output.data)) << 1)
-        else:
-            m.d.comb += self.output.data.eq(accumulator << 1)
+        m.d.comb += self.output.data.eq(convergent_round(accumulator, self.output.data))
         m.d.sync += self.output.valid.eq(arms[0].output.valid)
 
         return m
 
+
+
+class HalfBandInterpolationFilter(wiring.Component):
+    def __init__(self, taps, shape_in, delay=0, shape_out=None):
+        midtap = taps[len(taps)//2]
+        assert taps[1::2] == [0]*(len(taps)//4) + [midtap] + [0]*(len(taps)//4)
+        self.taps = taps
+        self.shape_in = shape_in
+        self.delay = delay
+
+        if shape_out is None:
+            # If output shape is not defined, add normalized DC gain
+            shape_out = signed(bits_for(-2**(shape_in.width-1) * sum(taps)))
+
+        super().__init__({
+            "input":  In(Stream(shape_in)),
+            "output": Out(Stream(shape_out)),
+        })
+
+    def elaborate(self, platform):
+        m = Module()
+
+        # Arms
+        m.submodules.fir0 = fir0 = FIRFilter(self.taps[0::2], self.shape_in)
+        m.submodules.fir1 = fir1 = FIRFilter(self.taps[1::2], self.shape_in)
+        arms = [fir0, fir1]
+
+        # Arm index selection: switch after every delivered sample
+        arm_index = Signal(range(2), init=self.delay)
+        with m.If(self.output.ready & self.output.valid):
+            m.d.sync += arm_index.eq(arm_index - 1)
+
+        # Deliver input samples
+        for i, arm in enumerate(arms):
+            m.d.comb += [
+                arm.input.data      .eq(self.input.data),
+                arm.input.valid     .eq(self.input.valid & arms[i^1].input.ready),
+            ]
+        m.d.comb += self.input.ready.eq(arms[0].input.ready & arms[1].input.ready)
+
+        # Output switching
+        with m.Switch(arm_index):
+            for i, arm in enumerate(arms):
+                with m.Case(i):
+                    m.d.comb += [
+                        self.output.data    .eq(convergent_round(arm.output.data, self.output.data)),
+                        self.output.valid   .eq(arm.output.valid),
+                        arm.output.ready    .eq(self.output.ready),
+                    ]
+
+        return m
 
 class FIRFilter(wiring.Component):
     
@@ -92,9 +145,13 @@ class FIRFilter(wiring.Component):
 
     def elaborate(self, platform):
         m = Module()
-
+        
         # History of previous samples
-        delay_line = [ Signal.like(self.input.data) for _ in range(len(self.taps) - 1) ]
+        delay_line = [ Signal.like(self.input.data, name=f"delay_{i}") for i in range(len(self.taps)-1) ]
+        with m.If(self.input.ready):
+            with m.If(self.input.valid):
+                # Update sample history
+                m.d.sync += Cat(delay_line).eq(Cat(self.input.data, *delay_line))
 
         # Check for coefficient symmetry
         taps      = self.taps
@@ -105,13 +162,18 @@ class FIRFilter(wiring.Component):
         # Sample window for multiplication with taps
         window = [self.input.data] + delay_line
         if symmetric:
+            window_valid = Signal()
             new_window = [ window[i] + window[-i-1] for i in range(len(window)//2) ]
             if len(window) % 2 == 1:
                 new_window.append(window[len(window)//2])
-            adder_reg = [ Signal.like(a) for a in new_window ]
-            with m.If(self.input.ready & self.input.valid):
-                m.d.sync += [ reg.eq(value) for reg, value in zip(adder_reg, new_window) ]
+            adder_reg = [ Signal.like(a, name=f"sym_{i}") for i, a in enumerate(new_window) ]
+            with m.If(self.input.ready):
+                m.d.sync += window_valid.eq(self.input.valid)
+                with m.If(self.input.valid):
+                    m.d.sync += [ reg.eq(value) for reg, value in zip(adder_reg, new_window) ]
             window = adder_reg
+        else:
+            window_valid = self.input.valid
 
         # Multiplication stage: definitions and stream processing
         muls_val = [ Sample(b) * Sample(a) for a, b in zip(taps, window) ]
@@ -123,20 +185,19 @@ class FIRFilter(wiring.Component):
         m.d.comb += self.input.ready.eq(~muls_valid | muls_ready)
 
         with m.If(self.input.ready):
-            m.d.sync += muls_valid.eq(self.input.valid)
-            with m.If(self.input.valid):
+            m.d.sync += muls_valid.eq(window_valid)
+            with m.If(window_valid):
                 # Multiply current window and store results
                 m.d.sync += [ reg.eq(value) for reg, value in zip(muls_reg, muls_val) ]
-                # Update sample history
-                m.d.sync += Cat(delay_line).eq(Cat(self.input.data, *delay_line))
                 
         # Adder tree stages, with ceil(log2(N)) levels
         level, level_valid, level_ready = muls_reg, muls_valid, muls_ready
+        lev = 0
         while len(level) > 1:
             even = level[0::2]
             odd  = level[1::2]
             results = [ a+b if b is not None else a for a,b in zip_longest(even, odd) ]
-            new_level = [ Signal.like(r) for r in results ]
+            new_level = [ Signal.like(r, name=f"add_{lev}_{i}") for i, r in enumerate(results) ]
             new_valid = Signal()
             new_ready = Signal()
             m.d.comb += level_ready.eq(~new_valid | new_ready)
@@ -145,6 +206,7 @@ class FIRFilter(wiring.Component):
                 with m.If(level_valid):
                     m.d.sync += [ reg.eq(value) for reg, value in zip(new_level, results) ]
             level, level_valid, level_ready = new_level, new_valid, new_ready
+            lev += 1
 
         # Output wiring
         m.d.comb += self.output.data   .eq(level[0])
@@ -226,6 +288,15 @@ def round_to_zero(n, w):
     else:
         return (n + ~n[-1])[:-1][-w:]
 
+def convergent_round(input, output):
+    iw = len(input)
+    ow = len(output)
+    if ow >= iw:
+        return input
+    w_convergent = input + Cat((~input[iw-ow]).replicate(iw-ow-1), input[iw-ow])
+    return w_convergent[:-1][-ow:]
+
+
 
 def to_csd_i(decimal_value: int) -> str:
     """
@@ -269,3 +340,148 @@ def to_csd_i(decimal_value: int) -> str:
             csd += "0"
         p2n = p2n_half
     return csd
+
+
+#
+# Tests
+#
+import unittest
+import numpy as np
+from amaranth.sim import Simulator, Tick
+
+class _TestFilter(unittest.TestCase):
+
+    def _generate_samples(self, count, width):
+        # Generate `count` random samples
+        rng = np.random.default_rng()
+        samples = rng.normal(0, 1, count)
+
+        # Convert to integer
+        samples = np.round(samples / max(abs(samples)) * (2**(width-1) - 1)).astype(int)
+        assert max(samples) < 2**(width-1) and min(samples) >= -2**(width-1)  # sanity check
+
+        return samples
+
+    def _filter(self, dut, samples, count):
+
+        def input_process():
+            for sample in samples:
+                yield dut.input.data .eq(int(sample))
+                yield dut.input.valid.eq(1)
+                yield Tick()
+                while not (yield dut.input.ready):
+                    yield Tick()
+            yield dut.input.valid.eq(0)
+        
+        filtered = []
+        def output_process():
+            yield dut.output.ready.eq(1)
+            while len(filtered) < count:
+                yield Tick()
+                if (yield dut.output.valid):
+                    filtered.append((yield dut.output.data))
+
+        sim = Simulator(dut)
+        sim.add_clock(1/100e6)
+        sim.add_process(input_process)
+        sim.add_process(output_process)
+        sim.run()
+        
+        return filtered
+
+
+class TestFIRFilter(_TestFilter):
+
+    def test_filter(self):
+        taps = [-1, 0, 9, 16, 9, 0, -1]
+        num_samples = 16*1024
+        input_width = 8
+        input_samples = self._generate_samples(num_samples, input_width)
+
+        # Compute the expected result
+        filtered_np = list(np.convolve(input_samples, taps).astype(int))
+
+        # Simulate DUT
+        dut = FIRFilter(taps, signed(input_width))
+        filtered = self._filter(dut, input_samples, len(input_samples))
+
+        self.assertListEqual(filtered_np[:len(filtered)], filtered)
+
+
+class TestHalfBandDecimator(_TestFilter):
+
+    def test_filter(self):
+        taps = [-1, 0, 9, 16, 9, 0, -1]
+        num_samples = 16*1024
+        input_width = 8
+        input_samples = self._generate_samples(num_samples, input_width)
+
+        # Compute the expected result
+        filtered_np = np.convolve(input_samples, taps).astype(int)
+        filtered_np = list(filtered_np[0::2])  # decimate
+
+        # Simulate DUT
+        dut = HalfBandDecimationFilter(taps, signed(input_width))
+        filtered = self._filter(dut, input_samples, len(input_samples) // 2)
+
+        self.assertListEqual(filtered_np[:len(filtered)], filtered)
+
+    def test_filter_rounding(self):
+        taps = [-1, 0, 9, 16, 9, 0, -1]
+        num_samples = 16*1024
+        input_width = 8
+        input_samples = self._generate_samples(num_samples, input_width)
+
+        # Compute the expected result
+        filtered_np = np.convolve(input_samples, taps).astype(int)
+        filtered_np = filtered_np[0::2]                 # decimate
+        filtered_np = list(np.round(filtered_np / 32))  # round
+
+        # Simulate DUT
+        dut = HalfBandDecimationFilter(taps, signed(input_width), shape_out=signed(input_width))
+        filtered = self._filter(dut, input_samples, len(input_samples) // 2)
+
+        self.assertListEqual(filtered_np[:len(filtered)], filtered)
+
+
+class TestHalfBandInterpolator(_TestFilter):
+
+    def test_filter(self):
+        taps = [-1, 0, 9, 16, 9, 0, -1]
+        num_samples = 16*1024
+        input_width = 8
+        input_samples = self._generate_samples(num_samples, input_width)
+
+        # Compute the expected result
+        input_samples_2x = np.zeros(2*len(input_samples))
+        input_samples_2x[0::2] = input_samples
+        filtered_np = np.convolve(input_samples_2x, taps).astype(int)
+        filtered_np = list(filtered_np)
+
+        # Simulate DUT
+        dut = HalfBandInterpolationFilter(taps, signed(input_width))
+        filtered = self._filter(dut, input_samples, 2*len(input_samples))
+
+        self.assertListEqual(filtered_np[:len(filtered)], filtered)
+
+    def test_filter_rounding(self):
+        taps = [-1, 0, 9, 16, 9, 0, -1]
+        num_samples = 16*1024
+        input_width = 8
+        input_samples = self._generate_samples(num_samples, input_width)
+
+        # Compute the expected result
+        input_samples_2x = np.zeros(2*len(input_samples))
+        input_samples_2x[0::2] = input_samples
+        filtered_np = np.convolve(input_samples_2x, taps).astype(int)
+        filtered_np = list(np.round(2 * filtered_np / 32))  # round
+
+        # Simulate DUT
+        dut = HalfBandInterpolationFilter(taps, signed(input_width), shape_out=signed(input_width))
+        filtered = self._filter(dut, input_samples, 2*len(input_samples))
+
+        self.assertListEqual(filtered_np[:len(filtered)], filtered)
+
+
+if __name__ == "__main__":
+    unittest.main()

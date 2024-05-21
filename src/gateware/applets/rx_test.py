@@ -10,7 +10,7 @@ import math
 import os
 import posix
 
-from amaranth                                   import Elaboratable, Module, Signal, Cat, DomainRenamer
+from amaranth                                   import Elaboratable, Module, Signal, Cat, DomainRenamer, signed
 from amaranth.lib.fifo                          import AsyncFIFO
 from amaranth.lib.wiring                        import Out, Signature, connect
 from amaranth_soc                               import wishbone
@@ -30,7 +30,7 @@ from urti.gateware.architecture.car             import URTIDomainGenerator
 from urti.gateware.interface                    import \
     MAX5865DataInterface, MAX5865OpModeSetter, MAX2120, MAX2831, RFFC5072RegisterInterface
 
-from urti.gateware.blocks.fir                   import HalfBandFilter
+from urti.gateware.blocks.fir                   import HalfBandDecimationFilter
 
 class URTITestRequestHandler(ControlRequestHandler):
     REQUEST_READ_REG   = 0
@@ -290,8 +290,8 @@ class URTIBasicTestGateware(Elaboratable):
 
         # Insert a half-band decimate-by-2 filter between the AFE and the FIFO.
         taps = [-2, 0, 7, 0, -18, 0, 41, 0, -92, 0, 320, 512, 320, 0, -92, 0, 41, 0, -18, 0, 7, 0, -2]
-        m.submodules.fir_re = fir_re = DomainRenamer("radio")(HalfBandFilter(8, taps))
-        m.submodules.fir_im = fir_im = DomainRenamer("radio")(HalfBandFilter(8, taps))
+        m.submodules.fir_re = fir_re = DomainRenamer("radio")(HalfBandDecimationFilter(taps, signed(8), shape_out=signed(8)))
+        m.submodules.fir_im = fir_im = DomainRenamer("radio")(HalfBandDecimationFilter(taps, signed(8), shape_out=signed(8)))
         m.d.comb += [
             # Connect decimators input.
             fir_re.input.data           .eq(afe_data.adc_data_i - 128),  # convert from offset binary

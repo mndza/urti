@@ -69,7 +69,7 @@ class URTIPlatform(LUNAApolloPlatform, LatticeECP5Platform):
 
         # Let the LUNA gateware take over in devices with shared USB port
         try:
-            debugger.honor_fpga_adv()
+            debugger.allow_fpga_takeover_usb()
         except AttributeError:
             pass
 
@@ -94,7 +94,7 @@ class URTIPlatform(LUNAApolloPlatform, LatticeECP5Platform):
 
         # Let the LUNA gateware take over in devices with shared USB port
         try:
-            debugger.honor_fpga_adv()
+            debugger.allow_fpga_takeover_usb()
         except AttributeError:
             pass
 

@@ -24,7 +24,7 @@ class MAX2120(Component):
         self.divisor = divisor
         self.address = address
         super().__init__()
-        self.bus.memory_map = MemoryMap(addr_width=4, data_width=8, name="max2120")
+        self.bus.memory_map = MemoryMap(addr_width=4, data_width=8)
 
     def elaborate(self, platform):
         m = Module()

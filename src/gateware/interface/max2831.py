@@ -24,7 +24,7 @@ class MAX2831(Component):
         self.pads = pads
         self.cycles = divisor
         super().__init__()
-        self.bus.memory_map = MemoryMap(addr_width=4, data_width=16, name="max2831")
+        self.bus.memory_map = MemoryMap(addr_width=4, data_width=16)
 
     def elaborate(self, platform):
         m = Module()

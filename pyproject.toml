@@ -13,7 +13,7 @@ description = "Python library for the Great Scott Gadgets URTI mainboard"
 urls = { Source = "https://greatscottgadgets.com/urti" }
 readme = "README.md"
 dependencies = [
-    "amaranth @ git+https://github.com/amaranth-lang/amaranth",
+    "amaranth @ git+https://github.com/amaranth-lang/amaranth@v0.5.0",
     "amaranth-soc @ git+https://github.com/amaranth-lang/amaranth-soc",
     "amaranth-boards @ git+https://github.com/amaranth-lang/amaranth-boards",
     "amaranth-stdio @ git+https://github.com/amaranth-lang/amaranth-stdio",

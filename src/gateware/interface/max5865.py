@@ -83,7 +83,7 @@ class MAX5865OpModeSetter(Component):
         self.cycles = divisor
 
         super().__init__()
-        self.bus.memory_map = MemoryMap(addr_width=1, data_width=8, name="max5865")
+        self.bus.memory_map = MemoryMap(addr_width=1, data_width=8)
 
 
     def elaborate(self, platform):

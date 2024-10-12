@@ -32,7 +32,7 @@ class RFFC5072RegisterInterface(Component):
         self.divisor = divisor
         self.pads    = pads
         super().__init__()
-        self.bus.memory_map = MemoryMap(addr_width=5, data_width=16, name=name or "rffc5072")
+        self.bus.memory_map = MemoryMap(addr_width=5, data_width=16)
 
 
     def elaborate(self, platform):
